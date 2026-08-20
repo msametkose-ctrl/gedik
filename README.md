@@ -1,5 +1,8 @@
 # Gedik
 
+[![CI](https://github.com/msametkose-ctrl/gedik/actions/workflows/ci.yml/badge.svg)](https://github.com/msametkose-ctrl/gedik/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A Quoridor engine written in Rust. Bitboard rules core, PUCT tree search,
 and a small learned evaluation network. No dependencies — `cargo build`
 works offline.
