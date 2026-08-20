@@ -2,9 +2,8 @@
 
 use gedik::bitboard::*;
 use gedik::board::Position;
-use gedik::heuristics::{candidate_moves, candidate_moves_filtered, value_to_move, Rng, playout};
+use gedik::heuristics::{candidate_moves, candidate_moves_filtered, playout, value_to_move, Rng};
 use gedik::mcts::{Leaf, Mcts};
-use gedik::moves::*;
 use gedik::search::Searcher;
 
 fn random_position(rng: &mut Rng, plies: usize) -> Position {
@@ -124,14 +123,22 @@ fn engines_take_an_available_win() {
     let mv = mv.expect("mcts hamle bulmalı");
     let mut q = p;
     q.make(mv);
-    assert_eq!(q.winner(), Some(0), "MCTS kazanan hamleyi almalı, oynadığı: {mv:?}");
+    assert_eq!(
+        q.winner(),
+        Some(0),
+        "MCTS kazanan hamleyi almalı, oynadığı: {mv:?}"
+    );
 
     let mut ab = Searcher::new(16);
     let (mv, _) = ab.best_move(&p, 6, 500);
     let mv = mv.expect("ab hamle bulmalı");
     let mut q = p;
     q.make(mv);
-    assert_eq!(q.winner(), Some(0), "alpha-beta kazanan hamleyi almalı, oynadığı: {mv:?}");
+    assert_eq!(
+        q.winner(),
+        Some(0),
+        "alpha-beta kazanan hamleyi almalı, oynadığı: {mv:?}"
+    );
 }
 
 #[test]
@@ -147,7 +154,10 @@ fn mcts_only_ever_returns_legal_moves() {
             mc.leaf = leaf;
             let (mv, st) = mc.search_rollouts(&p, 600);
             let mv = mv.expect("hamle dönmeli");
-            assert!(p.is_legal(mv), "MCTS illegal hamle döndü: {mv:?} ({leaf:?})");
+            assert!(
+                p.is_legal(mv),
+                "MCTS illegal hamle döndü: {mv:?} ({leaf:?})"
+            );
             assert!(st.rollouts > 0);
         }
     }
@@ -162,10 +172,7 @@ fn value_leaf_is_deterministic() {
     let mut b = Mcts::new(999_999);
     let (mv_a, _) = a.search_rollouts(&p, 4000);
     let (mv_b, _) = b.search_rollouts(&p, 4000);
-    assert_eq!(
-        mv_a, mv_b,
-        "Leaf::Value modunda seed sonucu değiştirmemeli"
-    );
+    assert_eq!(mv_a, mv_b, "Leaf::Value modunda seed sonucu değiştirmemeli");
 }
 
 // ------------------------------------------------- policy prior (PUCT)
@@ -243,7 +250,10 @@ fn walls_that_hurt_both_rank_below_advancing() {
         .find(|(m, _)| gedik::notation::move_name(&p, **m) == "e2")
         .map(|(_, &x)| x)
         .unwrap();
-    assert!(advance > wall_max * 3.0, "ilerleme baskın olmalı: {advance} vs {wall_max}");
+    assert!(
+        advance > wall_max * 3.0,
+        "ilerleme baskın olmalı: {advance} vs {wall_max}"
+    );
     assert!(wall_max > 0.0, "duvarlar tamamen sıfırlanmamalı");
 }
 
@@ -268,7 +278,10 @@ fn value_is_certain_at_terminal_positions() {
 fn value_prefers_being_closer_and_richer() {
     let base = Position::start();
     let v_start = value_to_move(&base);
-    assert!(v_start > 0.2 && v_start < 0.8, "başlangıç dengeli olmalı: {v_start}");
+    assert!(
+        v_start > 0.2 && v_start < 0.8,
+        "başlangıç dengeli olmalı: {v_start}"
+    );
 
     // Aynı pozisyon ama sıradaki oyuncunun duvar üstünlüğü var.
     //
@@ -287,7 +300,10 @@ fn value_prefers_being_closer_and_richer() {
     let mut ahead = base;
     ahead.pawn[0] = cell(2, 4) as u8;
     ahead.hash = ahead.compute_hash();
-    assert!(value_to_move(&ahead) > v_start, "yakın olmak değeri artırmalı");
+    assert!(
+        value_to_move(&ahead) > v_start,
+        "yakın olmak değeri artırmalı"
+    );
 }
 
 /// Duvar üstünlüğü değerlidir ama yarışı ezmez.
@@ -332,7 +348,11 @@ fn mcts_plays_the_immediate_win() {
     let mv = mv.expect("hamle bulunmalı");
     let mut q = p;
     q.make(mv);
-    assert_eq!(q.winner(), Some(0), "kazanan hamle oynanmalı, oynanan: {mv:?}");
+    assert_eq!(
+        q.winner(),
+        Some(0),
+        "kazanan hamle oynanmalı, oynanan: {mv:?}"
+    );
     assert!(st.rollouts <= 400);
 }
 
@@ -410,9 +430,24 @@ fn elo_orders_a_transitive_ladder() {
     use gedik::rating::{solve, Pairing};
     // A, B'yi %75; B, C'yi %75; A, C'yi %90 yeniyor.
     let ps = vec![
-        Pairing { a: 0, b: 1, a_score: 30.0, games: 40.0 },
-        Pairing { a: 1, b: 2, a_score: 30.0, games: 40.0 },
-        Pairing { a: 0, b: 2, a_score: 36.0, games: 40.0 },
+        Pairing {
+            a: 0,
+            b: 1,
+            a_score: 30.0,
+            games: 40.0,
+        },
+        Pairing {
+            a: 1,
+            b: 2,
+            a_score: 30.0,
+            games: 40.0,
+        },
+        Pairing {
+            a: 0,
+            b: 2,
+            a_score: 36.0,
+            games: 40.0,
+        },
     ];
     let r = solve(3, &ps, 4000);
     assert!(r[0] > r[1], "A, B'den yüksek olmalı: {r:?}");
@@ -427,7 +462,12 @@ fn elo_orders_a_transitive_ladder() {
 #[test]
 fn elo_handles_a_single_pairing() {
     use gedik::rating::{solve, Pairing};
-    let ps = vec![Pairing { a: 0, b: 1, a_score: 8.0, games: 10.0 }];
+    let ps = vec![Pairing {
+        a: 0,
+        b: 1,
+        a_score: 8.0,
+        games: 10.0,
+    }];
     let r = solve(2, &ps, 2000);
     assert!(r[0] > r[1]);
     assert!((r[0] + r[1]).abs() < 1e-6);
@@ -498,7 +538,10 @@ fn walls_cannot_rescue_a_lost_race() {
     p.hash = p.compute_hash();
     let d0 = p.distance(0).unwrap();
     let d1 = p.distance(1).unwrap();
-    assert!(d0 > d1 + 3, "kurulum: A belirgin geride olmalı ({d0} vs {d1})");
+    assert!(
+        d0 > d1 + 3,
+        "kurulum: A belirgin geride olmalı ({d0} vs {d1})"
+    );
     assert!(
         value_to_move(&p) < 0.3,
         "10 duvar da olsa kapanmayacak açık kazanç sayılmamalı"
@@ -522,7 +565,10 @@ fn does_not_shuffle_when_lost() {
     p.walls = [3, 3];
     p.hash = p.compute_hash();
     let start_dist = p.distance(0).unwrap();
-    assert!(value_to_move(&p) < 0.2, "kurulum: pozisyon kaybedilmiş olmalı");
+    assert!(
+        value_to_move(&p) < 0.2,
+        "kurulum: pozisyon kaybedilmiş olmalı"
+    );
 
     let mut played = Vec::new();
     for _ in 0..3 {
@@ -553,7 +599,11 @@ fn does_not_shuffle_when_lost() {
         "kayıp pozisyonda bile hedefe yaklaşmalı: {start_dist} -> {end_dist}, hamleler {played:?}"
     );
     assert!(
-        played.iter().collect::<std::collections::HashSet<_>>().len() == played.len(),
+        played
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+            == played.len(),
         "aynı hamle tekrar etmemeli (mekik): {played:?}"
     );
 }

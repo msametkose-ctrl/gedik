@@ -76,7 +76,7 @@ fn start_move_count() {
 fn wall_shape_conflicts() {
     let mut p = Position::start();
     p.make(Move::hwall(wslot(3, 3))); // d6h
-    // Aynı slot dolu
+                                      // Aynı slot dolu
     assert!(!p.wall_shape_ok(wslot(3, 3), true));
     // Dik kesişme aynı merkezde yasak
     assert!(!p.wall_shape_ok(wslot(3, 3), false));
@@ -175,10 +175,22 @@ fn straight_jump_is_mandatory_when_open() {
     let p = pos_with(cell(4, 4), cell(3, 4), 0, 0, 0);
     let t = pawn_targets(&p);
     // e7 = (2,4) düz atlama; diyagonaller (d6/f6) olmamalı.
-    assert!(t.contains(&"e7".to_string()), "düz atlama üretilmeli: {t:?}");
-    assert!(!t.contains(&"d6".to_string()), "atlama açıkken diyagonal olmamalı: {t:?}");
-    assert!(!t.contains(&"f6".to_string()), "atlama açıkken diyagonal olmamalı: {t:?}");
-    assert!(!t.contains(&"e6".to_string()), "rakibin karesine girilemez: {t:?}");
+    assert!(
+        t.contains(&"e7".to_string()),
+        "düz atlama üretilmeli: {t:?}"
+    );
+    assert!(
+        !t.contains(&"d6".to_string()),
+        "atlama açıkken diyagonal olmamalı: {t:?}"
+    );
+    assert!(
+        !t.contains(&"f6".to_string()),
+        "atlama açıkken diyagonal olmamalı: {t:?}"
+    );
+    assert!(
+        !t.contains(&"e6".to_string()),
+        "rakibin karesine girilemez: {t:?}"
+    );
     // Yanlar ve geri normal
     assert!(t.contains(&"d5".to_string()));
     assert!(t.contains(&"f5".to_string()));
@@ -192,9 +204,15 @@ fn diagonal_allowed_when_wall_behind_opponent() {
     // Yatay merkez (2,4) sütun 4 ve 5'i keser -> (2,4)-(3,4) kapanır.
     let p = pos_with(cell(4, 4), cell(3, 4), 0, 1u64 << wslot(2, 4), 0);
     let m = p.masks();
-    assert!(!m.step_open(cell(3, 4), NORTH), "duvar B'nin arkasını kapatmalı");
+    assert!(
+        !m.step_open(cell(3, 4), NORTH),
+        "duvar B'nin arkasını kapatmalı"
+    );
     let t = pawn_targets(&p);
-    assert!(!t.contains(&"e7".to_string()), "düz atlama kapalı olmalı: {t:?}");
+    assert!(
+        !t.contains(&"e7".to_string()),
+        "düz atlama kapalı olmalı: {t:?}"
+    );
     assert!(t.contains(&"d6".to_string()), "sol diyagonal olmalı: {t:?}");
     assert!(t.contains(&"f6".to_string()), "sağ diyagonal olmalı: {t:?}");
 }
@@ -217,8 +235,14 @@ fn diagonal_blocked_by_side_wall() {
     let v = 1u64 << wslot(3, 3);
     let p = pos_with(cell(4, 4), cell(3, 4), 0, h, v);
     let t = pawn_targets(&p);
-    assert!(!t.contains(&"d6".to_string()), "batı diyagonali kapalı olmalı: {t:?}");
-    assert!(t.contains(&"f6".to_string()), "doğu diyagonali açık olmalı: {t:?}");
+    assert!(
+        !t.contains(&"d6".to_string()),
+        "batı diyagonali kapalı olmalı: {t:?}"
+    );
+    assert!(
+        t.contains(&"f6".to_string()),
+        "doğu diyagonali açık olmalı: {t:?}"
+    );
     // A'nın kendi batı hamlesi de aynı duvarla kapanır: (4,4)-(4,3)
     assert!(!t.contains(&"d5".to_string()), "{t:?}");
 }
@@ -230,8 +254,14 @@ fn wall_that_seals_a_player_is_illegal() {
     // B (0,0)'da. v(0,0) doğuyu 0. ve 1. satırda keser.
     // h(1,0) eklenirse {(0,0),(1,0)} bölgesi tamamen kapanır -> illegal olmalı.
     let p = pos_with(cell(8, 4), cell(0, 0), 0, 0, 1u64 << wslot(0, 0));
-    assert!(p.wall_shape_ok(wslot(1, 0), true), "şekilsel olarak yerleşebilir");
-    assert!(!p.wall_legal(wslot(1, 0), true), "B'yi hapsettiği için illegal olmalı");
+    assert!(
+        p.wall_shape_ok(wslot(1, 0), true),
+        "şekilsel olarak yerleşebilir"
+    );
+    assert!(
+        !p.wall_legal(wslot(1, 0), true),
+        "B'yi hapsettiği için illegal olmalı"
+    );
     assert!(!p.wall_legal_slow(wslot(1, 0), true));
     // Kısayol bu duvar için tam kontrol istemek zorunda
     assert!(!p.paths_open(1u64 << wslot(1, 0), 1u64 << wslot(0, 0)));
@@ -536,12 +566,12 @@ fn fen_rejects_garbage() {
     for bad in [
         "",
         "bozuk",
-        "0/0/76/4/10/10/0",           // eksik alan
-        "0/0/76/76/10/10/0/0",        // iki piyon aynı karede
-        "0/0/81/4/10/10/0/0",         // tahta dışı piyon
-        "0/0/76/4/11/10/0/0",         // duvar sayısı fazla
-        "0/0/76/4/10/10/2/0",         // geçersiz sıra
-        "zz/0/76/4/10/10/0/0",        // hex değil
+        "0/0/76/4/10/10/0",    // eksik alan
+        "0/0/76/76/10/10/0/0", // iki piyon aynı karede
+        "0/0/81/4/10/10/0/0",  // tahta dışı piyon
+        "0/0/76/4/11/10/0/0",  // duvar sayısı fazla
+        "0/0/76/4/10/10/2/0",  // geçersiz sıra
+        "zz/0/76/4/10/10/0/0", // hex değil
         // B'yi (0,0) köşesinde hapseden duvarlar: v(0,0) slot 0 + h(1,0) slot 8
         "100/1/76/0/8/8/0/0",
     ] {
