@@ -87,7 +87,9 @@ impl Engine {
                         cfg.c_uct = v;
                     } else {
                         for kv in spec.split(',') {
-                            let Some((k, v)) = kv.split_once('=') else { continue };
+                            let Some((k, v)) = kv.split_once('=') else {
+                                continue;
+                            };
                             let Ok(x) = v.parse::<f32>() else { continue };
                             match k.trim() {
                                 "cp" | "cpuct" => cfg.c_puct = x,
@@ -96,7 +98,8 @@ impl Engine {
                                 "et" | "expand" => cfg.expand_threshold = x as u32,
                                 "mn" | "maxnodes" => cfg.max_nodes = x as usize,
                                 "mc" | "maxchildren" => {
-                                    cfg.max_children = if x <= 0.0 { usize::MAX } else { x as usize }
+                                    cfg.max_children =
+                                        if x <= 0.0 { usize::MAX } else { x as usize }
                                 }
                                 "wp" | "wallprob" => cfg.wall_prob = x,
                                 "noise" => cfg.root_noise = x,

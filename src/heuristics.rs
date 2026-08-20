@@ -293,8 +293,8 @@ pub fn features(pos: &Position) -> [f32; NUM_FEATURES] {
     let phase = (w_me + w_opp) as f32 / 20.0;
 
     [
-        1.0,                                  // 0  sabit
-        tempo as f32 / 4.0,                   // 1  ham tempo
+        1.0,                // 0  sabit
+        tempo as f32 / 4.0, // 1  ham tempo
         // 2  duvar farkı — ama sadece yarış hâlâ kazanılabilirken.
         //    `opt < 0` iken duvarın hiçbir değeri yok; bunu modele
         //    söylemezsek doğrusal terim büyümeye devam ediyor ve arama
@@ -304,22 +304,21 @@ pub fn features(pos: &Position) -> [f32; NUM_FEATURES] {
         } else {
             0.0
         },
-        phase,                                // 3  oyun evresi
-        tempo as f32 / 4.0 * phase,           // 4  tempo x evre
-        (d_me + d_opp) as f32 / 16.0,         // 5  oyun ne kadar ilerledi
-        f32::from(w_opp == 0),                // 6  rakip engelleyemez
-        f32::from(w_me == 0),                 // 7  biz engelleyemeyiz
-        opt.clamp(-6, 6) as f32 / 6.0,        // 8  iyimser yarış
-        pes.clamp(-6, 6) as f32 / 6.0,        // 9  kötümser yarış
-        f32::from(opt < 0),                   // 10 duvarlarım yetmez -> kayıp
-        f32::from(pes > 0),                   // 11 rakibin duvarı yetmez -> kazanç
+        phase,                         // 3  oyun evresi
+        tempo as f32 / 4.0 * phase,    // 4  tempo x evre
+        (d_me + d_opp) as f32 / 16.0,  // 5  oyun ne kadar ilerledi
+        f32::from(w_opp == 0),         // 6  rakip engelleyemez
+        f32::from(w_me == 0),          // 7  biz engelleyemeyiz
+        opt.clamp(-6, 6) as f32 / 6.0, // 8  iyimser yarış
+        pes.clamp(-6, 6) as f32 / 6.0, // 9  kötümser yarış
+        f32::from(opt < 0),            // 10 duvarlarım yetmez -> kayıp
+        f32::from(pes > 0),            // 11 rakibin duvarı yetmez -> kazanç
     ]
 }
 
 /// Elle tahmin edilmiş ağırlıklar — karşılaştırma tabanı.
-pub const WEIGHTS_HAND: [f32; NUM_FEATURES] = [
-    0.0, 1.5, 1.0, 0.0, 0.0, 0.0, 0.3, -0.3, 2.0, 2.0, -3.0, 3.0,
-];
+pub const WEIGHTS_HAND: [f32; NUM_FEATURES] =
+    [0.0, 1.5, 1.0, 0.0, 0.0, 0.0, 0.3, -0.3, 2.0, 2.0, -3.0, 3.0];
 
 /// 26.319 self-play pozisyonundan lojistik regresyonla öğrenilmiş ağırlıklar.
 /// Doğrulama kümesinde doğruluk 0.667 -> 0.772, logloss 0.773 -> 0.461.
@@ -350,8 +349,7 @@ pub const WEIGHTS_HAND: [f32; NUM_FEATURES] = [
 ///    dönülüyor), zayıf ceza da aramaya kaçış deliği açıyordu: motor cezanın
 ///    kalktığı bir yaprak bulup kaybedilmiş pozisyonu kazanılmış sanıyordu.
 pub const WEIGHTS_LEARNED: [f32; NUM_FEATURES] = [
-    0.28846, 0.97101, 2.4541, 0.0, 0.0, 0.068557, 0.0, 0.0,
-    -1.3472, -0.96404, -2.5, 2.5,
+    0.28846, 0.97101, 2.4541, 0.0, 0.0, 0.068557, 0.0, 0.0, -1.3472, -0.96404, -2.5, 2.5,
 ];
 
 /// Motorun kullandığı ağırlıklar.
@@ -702,8 +700,10 @@ pub fn move_priors(pos: &Position, moves: &[Move]) -> Vec<f32> {
     let opp = 1 - side;
     let m = pos.masks();
     let base = [
-        m.distance_to_row(pos.pawn[0] as usize, goal_row(0)).unwrap_or(99),
-        m.distance_to_row(pos.pawn[1] as usize, goal_row(1)).unwrap_or(99),
+        m.distance_to_row(pos.pawn[0] as usize, goal_row(0))
+            .unwrap_or(99),
+        m.distance_to_row(pos.pawn[1] as usize, goal_row(1))
+            .unwrap_or(99),
     ];
     let best_targets = {
         let mut t = 0u128;

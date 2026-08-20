@@ -160,7 +160,11 @@ impl Mcts {
     }
 
     /// Sabit rollout bütçesiyle arama.
-    pub fn search_rollouts(&mut self, pos: &Position, rollouts: u32) -> (Option<Move>, SearchStats) {
+    pub fn search_rollouts(
+        &mut self,
+        pos: &Position,
+        rollouts: u32,
+    ) -> (Option<Move>, SearchStats) {
         self.run(pos, rollouts, None)
     }
 
@@ -254,9 +258,7 @@ impl Mcts {
             None
         };
 
-        let best = proven
-            .or(fallback)
-            .or_else(|| top.first().map(|t| t.0));
+        let best = proven.or(fallback).or_else(|| top.first().map(|t| t.0));
         let win_rate = top.first().map(|t| t.2).unwrap_or(0.0);
         top.truncate(24); // 6 gösterim için yeterliydi; politika hedefi için daha fazlası lazım
 
@@ -307,8 +309,7 @@ impl Mcts {
                         && (self.policy_mode > 1 || idx == 0)
                         && crate::nn::net().is_some_and(|n| n.has_policy());
                     let ham = if ag_politika {
-                        crate::nn::net()
-                            .and_then(|n| n.policy(&pos, &moves, &mut self.nn_scratch))
+                        crate::nn::net().and_then(|n| n.policy(&pos, &moves, &mut self.nn_scratch))
                     } else {
                         None
                     };
@@ -467,8 +468,7 @@ impl Mcts {
                 break;
             }
             let first = p.first_child as usize;
-            let all_lost = (0..p.n_children as usize)
-                .all(|i| self.nodes[first + i].proof == 1);
+            let all_lost = (0..p.n_children as usize).all(|i| self.nodes[first + i].proof == 1);
             if all_lost {
                 self.nodes[parent].proof = -1;
             } else {
@@ -729,9 +729,7 @@ pub fn search_parallel(
 
     let mut top: Vec<(Move, u32, f32)> = agg
         .iter()
-        .map(|(&id, &(v, val, _))| {
-            (Move(id), v, if v > 0 { val / v as f32 } else { 0.0 })
-        })
+        .map(|(&id, &(v, val, _))| (Move(id), v, if v > 0 { val / v as f32 } else { 0.0 }))
         .collect();
     top.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.total_cmp(&a.2)));
 

@@ -20,9 +20,9 @@
 //! iterasyondan sonra zaten güçlenmiyor (200 bin -> 2 milyon: +19 Elo).
 
 use crate::bitboard::{CELLS, WSLOTS};
-use crate::moves::NUM_ACTIONS;
 use crate::board::Position;
 use crate::heuristics::{features, threat_features, NUM_FEATURES, NUM_THREAT};
+use crate::moves::NUM_ACTIONS;
 use std::sync::OnceLock;
 
 pub const N_SPARSE: usize = CELLS + CELLS + WSLOTS + WSLOTS + 11 + 11 + 1; // 313
@@ -92,9 +92,8 @@ impl Net {
         if buf.len() < 16 || &buf[0..4] != b"QNN1" {
             return None;
         }
-        let rd_u32 = |o: usize| {
-            u32::from_le_bytes([buf[o], buf[o + 1], buf[o + 2], buf[o + 3]]) as usize
-        };
+        let rd_u32 =
+            |o: usize| u32::from_le_bytes([buf[o], buf[o + 1], buf[o + 2], buf[o + 3]]) as usize;
         let n_in = rd_u32(4);
         let h1 = rd_u32(8);
         let h2 = rd_u32(12);
@@ -118,7 +117,9 @@ impl Net {
         fn take(buf: &[u8], o: &mut usize, n: usize) -> Vec<f32> {
             let base = *o;
             let out = (0..n)
-                .map(|i| f32::from_le_bytes(buf[base + i * 4..base + i * 4 + 4].try_into().unwrap()))
+                .map(|i| {
+                    f32::from_le_bytes(buf[base + i * 4..base + i * 4 + 4].try_into().unwrap())
+                })
                 .collect();
             *o += n * 4;
             out
@@ -146,7 +147,17 @@ impl Net {
         } else {
             None
         };
-        Some(Net { h1, h2, pol, w1, b1, w2, b2, w3, b3 })
+        Some(Net {
+            h1,
+            h2,
+            pol,
+            w1,
+            b1,
+            w2,
+            b2,
+            w3,
+            b3,
+        })
     }
 
     pub fn has_policy(&self) -> bool {
@@ -181,7 +192,12 @@ impl Net {
 
     /// Verilen hamleler için politika logitleri. Gövdeyi paylaştığı için
     /// ek maliyet yalnızca h1 x hamle sayısı kadar çarpma.
-    pub fn policy(&self, pos: &Position, moves: &[crate::moves::Move], scratch: &mut Vec<u16>) -> Option<Vec<f32>> {
+    pub fn policy(
+        &self,
+        pos: &Position,
+        moves: &[crate::moves::Move],
+        scratch: &mut Vec<u16>,
+    ) -> Option<Vec<f32>> {
         let (pw, pb) = self.pol.as_ref()?;
         let a1 = self.trunk(pos, scratch);
         let mut out = Vec::with_capacity(moves.len());
