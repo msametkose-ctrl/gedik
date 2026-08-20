@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gedik — Quoridor motoru</title>
+<style>
+  :root {
+    --cell: 46px;
+    --gut: 14px;
+    --bg: #12141a;
+    --panel: #1a1d26;
+    --line: #2a2f3d;
+    --ink: #e6e9f0;
+    --dim: #8c93a5;
+    --a: #f0a23c;
+    --b: #45c6e0;
+    --wall: #d8dce6;
+    --ok: #4ade80;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px;
+    background: var(--bg); color: var(--ink);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start;
+  }
+  h1 { font-size: 16px; margin: 0 0 4px; font-weight: 600; letter-spacing: .01em; }
+  .sub { color: var(--dim); font-size: 12px; margin-bottom: 16px; }
+
+  /* ---------------- tahta ---------------- */
+  .boardwrap { display: flex; gap: 8px; }
+  .ranks { display: grid; gap: 0; }
+  .ranks div {
+    height: var(--cell); line-height: var(--cell);
+    color: var(--dim); font-size: 11px; width: 16px; text-align: right;
+  }
+  .ranks div.gut { height: var(--gut); line-height: var(--gut); }
+  .files { display: grid; margin-left: 6px; }
+  .files div { width: var(--cell); color: var(--dim); font-size: 11px; text-align: center; }
+  .files div.gut { width: var(--gut); }
+
+  #board {
+    display: grid;
+    grid-template-columns: repeat(8, var(--cell) var(--gut)) var(--cell);
+    grid-template-rows: repeat(8, var(--cell) var(--gut)) var(--cell);
+    background: var(--panel);
+    padding: 6px; border-radius: 10px; border: 1px solid var(--line);
+    position: relative;
+  }
+  .cell {
+    background: #22262f; border-radius: 5px;
+    display: flex; align-items: center; justify-content: center;
+    position: relative; cursor: default;
+  }
+  .cell.goalA { background: #2a2620; }
+  .cell.goalB { background: #1e262b; }
+  .cell.legal { cursor: pointer; box-shadow: inset 0 0 0 2px rgba(74,222,128,.35); }
+  .cell.legal::after {
+    content: ""; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--ok); opacity: .8;
+  }
+  .pawn {
+    width: 30px; height: 30px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; color: #12141a;
+    box-shadow: 0 2px 6px rgba(0,0,0,.4);
+  }
+  .pawn.A { background: var(--a); }
+  .pawn.B { background: var(--b); }
+  .cell.legal .pawn { display: none; }
+
+  .slot { z-index: 2; }
+  .slot.legal { cursor: pointer; }
+  .slot.legal:hover { background: rgba(216,220,230,.14); border-radius: 3px; }
+  .wall { background: var(--wall); border-radius: 3px; z-index: 1; }
+  .wall.fresh { background: var(--ok); }
+  #preview { background: rgba(216,220,230,.45); border-radius: 3px; z-index: 1; display: none; }
+
+  /* ---------------- panel ---------------- */
+  .panel { width: 340px; display: flex; flex-direction: column; gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .card h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin: 0 0 10px; font-weight: 600; }
+  label { display: block; font-size: 11px; color: var(--dim); margin-bottom: 3px; }
+  select, input, button {
+    font: inherit; font-size: 13px;
+    background: #22262f; color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; width: 100%;
+  }
+  button { cursor: pointer; font-weight: 500; }
+  button:hover { background: #2c313d; }
+  button.primary { background: #2f4a3a; border-color: #3d6349; }
+  button.primary:hover { background: #386047; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  .field { margin-bottom: 10px; }
+  .field:last-child { margin-bottom: 0; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+  th { text-align: left; color: var(--dim); font-weight: 500; font-size: 11px; padding-bottom: 4px; }
+  td { padding: 2px 0; }
+  td.num { text-align: right; color: var(--dim); }
+  .kv { display: flex; justify-content: space-between; font-size: 13px; padding: 2px 0; }
+  .kv span:last-child { font-variant-numeric: tabular-nums; }
+  .chipA { color: var(--a); font-weight: 600; }
+  .chipB { color: var(--b); font-weight: 600; }
+  #hist { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--dim); word-break: break-all; max-height: 96px; overflow-y: auto; }
+  #fen { font-family: ui-monospace, monospace; font-size: 11px; }
+  #status { font-size: 13px; min-height: 20px; }
+  .thinking { color: var(--ok); }
+  .err { color: #f87171; }
+  #elotab td.eng { cursor: pointer; }
+  #elotab tr:hover td { background: #22262f; }
+  #elotab td.rank { color: var(--dim); width: 18px; }
+  .bar { height: 4px; background: var(--ok); border-radius: 2px; opacity:.65; margin-top:3px; }
+</style>
+</head>
+<body>
+
+<div>
+  <h1>Gedik <span style="font-weight:400;color:var(--dim);font-size:14px">Quoridor motoru</span></h1>
+  <div class="sub">bitboard çekirdek + heuristic MCTS · yerel</div>
+  <div class="boardwrap">
+    <div class="ranks" id="ranks"></div>
+    <div>
+      <div id="board"></div>
+      <div class="files" id="files"></div>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="card">
+    <h2>Oyun</h2>
+    <div class="field">
+      <label>Sen</label>
+      <select id="you">
+        <option value="0">A — altta, yukarı çıkar (ilk oynar)</option>
+        <option value="1">B — üstte, aşağı iner</option>
+        <option value="none">izleyici — iki motor oynasın</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>A motoru (sen A değilsen)</label>
+      <select id="engA"></select>
+    </div>
+    <div class="field">
+      <label>B motoru (sen B değilsen)</label>
+      <select id="engB"></select>
+    </div>
+    <div class="field row">
+      <button class="primary" id="new">Yeni oyun</button>
+      <button id="undo">Geri al</button>
+    </div>
+    <div class="field row">
+      <button id="flip">Tahtayı çevir</button>
+      <button id="hint">Motora sor</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Maç modu</h2>
+    <div class="field">
+      <label>Hız</label>
+      <select id="hiz">
+        <option value="0">en hızlı — bekleme yok</option>
+        <option value="120" selected>hızlı (0.12 sn)</option>
+        <option value="400">izlenebilir (0.4 sn)</option>
+        <option value="1000">yavaş (1 sn)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Açılış</label>
+      <select id="acilis">
+        <option value="0">standart (hep aynı oyun)</option>
+        <option value="4">4 yarım hamle rastgele</option>
+        <option value="6" selected>6 yarım hamle rastgele</option>
+        <option value="8">8 yarım hamle rastgele</option>
+      </select>
+    </div>
+    <div class="field row">
+      <button class="primary" id="macbas">Maç başlat</button>
+      <button id="macdur">Durdur</button>
+    </div>
+    <div id="skor" style="color:var(--dim);font-size:12px">maç yok</div>
+  </div>
+
+  <div class="card">
+    <h2>Durum</h2>
+    <div id="status">—</div>
+    <div class="kv"><span class="chipA">A</span><span id="sA">—</span></div>
+    <div class="kv"><span class="chipB">B</span><span id="sB">—</span></div>
+  </div>
+
+  <div class="card" id="deneykart" style="display:none">
+    <h2>Deneyler <span id="deneynot" style="text-transform:none;letter-spacing:0;color:var(--dim);font-weight:400"></span></h2>
+    <div id="deneywrap" style="color:var(--dim);font-size:12px"></div>
+  </div>
+
+  <div class="card">
+    <h2>Motor gücü <span id="elonote" style="text-transform:none;letter-spacing:0"></span></h2>
+    <div id="elowrap" style="color:var(--dim);font-size:12px">yükleniyor…</div>
+  </div>
+
+  <div class="card">
+    <h2>Son arama</h2>
+    <div id="botinfo" style="color:var(--dim);font-size:12px">henüz arama yok</div>
+    <table id="toptab" style="margin-top:8px;display:none">
+      <thead><tr><th>hamle</th><th class="num">ziyaret</th><th class="num">kazanma</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Hamleler</h2>
+    <div id="hist">—</div>
+  </div>
+
+  <div class="card">
+    <h2>Pozisyon</h2>
+    <input id="fen" spellcheck="false">
+    <div class="field row" style="margin-top:8px">
+      <button id="load">FEN yükle</button>
+      <button id="copy">Kopyala</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const N = 9, WD = 8;
+let CORES = 1;
+// Süre bütçeli seçenekler tüm çekirdekleri kullanır (t=0 = makinedeki kadar).
+const ENGINES = [
+  // Varsayilan deger fonksiyonu artik ogrenilmis olan (+267 Elo, 181 oyun).
+  // Geriye kalan tek ayar butce, ve arama ~300 bin iterasyonda tavan yapiyor:
+  // 20 bin -> 200 bin +131 Elo, 200 bin -> 2 milyon sadece +19 (belirsiz).
+  // O yuzden "10 saniye" gibi bir secenek yok; olculebilir faydasi yok.
+  //
+  // Ablasyonlar (mctsu / mctsr / mctsf / w=0 / ab) listeden cikti ama
+  // kaybolmadi: "Motor gucu" tablosundaki satira tiklayinca o motor
+  // seciciye yukleniyor, ve `gedik match` hepsini hala kabul ediyor.
+  ["mcts:2500",       "Kolay — 2 500 iterasyon"],
+  ["mcts:20000",      "Orta — 20 000 iterasyon"],
+  ["mcts:60000",      "Zor — 60 000 iterasyon"],
+  ["mcts:300000:t=0", "En güçlü — 300 000 iterasyon"],
+];
+
+// Sayfa URL'inde ?fen=... varsa oradan başla — pozisyon paylaşmayı ve
+// belirli bir pozisyonu tekrar tekrar test etmeyi kolaylaştırıyor.
+const START = new URLSearchParams(location.search).get("fen") || "0/0/76/4/10/10/0/0";
+
+let history = [];          // fen listesi
+let state = null;          // /api/state cevabı
+let flipped = false;
+let busy = false;
+let lastMoveSlot = null;   // {kind, slot} — yeni konan duvarı vurgulamak için
+const names = [];          // oynanan hamlelerin notasyonu
+
+const $ = id => document.getElementById(id);
+const board = $("board");
+
+// -------------------------------------------------- ızgara yerleşimi
+const dispRow = r => flipped ? (N - 1 - r) : r;          // hücre satırı
+const dispGut = r => flipped ? (WD - 1 - r) : r;         // duvar oluğu
+
+function place(el, r0, c0, rs, cs) {
+  el.style.gridRow = `${r0} / span ${rs}`;
+  el.style.gridColumn = `${c0} / span ${cs}`;
+}
+
+function layoutCell(el, r, c) { place(el, 2 * dispRow(r) + 1, 2 * c + 1, 1, 1); }
+// yatay duvar (r,c): r/r+1 arası oluk, c ve c+1 sütunlarını kaplar
+function layoutH(el, r, c, span) { place(el, 2 * dispGut(r) + 2, 2 * c + 1, 1, span); }
+// dikey duvar (r,c): c/c+1 arası oluk, r ve r+1 satırlarını kaplar
+function layoutV(el, r, c, span) {
+  const top = flipped ? dispRow(r + 1) : dispRow(r);
+  place(el, 2 * top + 1, 2 * c + 2, span, 1);
+}
+
+// -------------------------------------------------- DOM kurulumu
+const cells = [], hslots = [], vslots = [];
+const preview = document.createElement("div");
+preview.id = "preview";
+const wallLayer = [];
+
+function build() {
+  board.innerHTML = "";
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    const d = document.createElement("div");
+    d.className = "cell";
+    if (r === 0) d.classList.add("goalA");
+    if (r === N - 1) d.classList.add("goalB");
+    d.dataset.i = r * N + c;
+    d.onclick = () => onCell(r * N + c);
+    board.appendChild(d);
+    cells[r * N + c] = d;
+  }
+  for (let r = 0; r < WD; r++) for (let c = 0; c < WD; c++) {
+    for (const kind of ["h", "v"]) {
+      const d = document.createElement("div");
+      d.className = "slot " + kind;
+      const slot = r * WD + c;
+      d.onclick = () => onSlot(kind, slot);
+      d.onmouseenter = () => {
+        if (!d.classList.contains("legal")) return;
+        preview.className = kind;
+        if (kind === "h") layoutH(preview, r, c, 3); else layoutV(preview, r, c, 3);
+        preview.style.display = "block";
+      };
+      d.onmouseleave = () => { preview.style.display = "none"; };
+      board.appendChild(d);
+      (kind === "h" ? hslots : vslots)[slot] = d;
+    }
+  }
+  board.appendChild(preview);
+  relayout();
+  labels();
+}
+
+function relayout() {
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) layoutCell(cells[r * N + c], r, c);
+  for (let r = 0; r < WD; r++) for (let c = 0; c < WD; c++) {
+    layoutH(hslots[r * WD + c], r, c, 2);
+    layoutV(vslots[r * WD + c], r, c, 2);
+  }
+  for (const w of wallLayer) {
+    if (w.kind === "h") layoutH(w.el, w.r, w.c, 3); else layoutV(w.el, w.r, w.c, 3);
+  }
+}
+
+function labels() {
+  const ranks = $("ranks"), files = $("files");
+  ranks.innerHTML = ""; files.innerHTML = "";
+  for (let r = 0; r < N; r++) {
+    const d = document.createElement("div");
+    d.textContent = flipped ? (r + 1) : (N - r);   // notasyon satırı
+    ranks.appendChild(d);
+    if (r < N - 1) { const g = document.createElement("div"); g.className = "gut"; ranks.appendChild(g); }
+  }
+  for (let c = 0; c < N; c++) {
+    const d = document.createElement("div");
+    d.textContent = String.fromCharCode(97 + c);
+    files.appendChild(d);
+    if (c < N - 1) { const g = document.createElement("div"); g.className = "gut"; files.appendChild(g); }
+  }
+  files.style.display = "flex";
+  ranks.style.marginTop = "6px";
+}
+
+// -------------------------------------------------- render
+function render() {
+  if (!state) return;
+  // duvarlar
+  for (const w of wallLayer) w.el.remove();
+  wallLayer.length = 0;
+  for (const [kind, list] of [["h", state.h], ["v", state.v]]) {
+    for (const slot of list) {
+      const el = document.createElement("div");
+      el.className = "wall " + kind;
+      if (lastMoveSlot && lastMoveSlot.kind === kind && lastMoveSlot.slot === slot) el.classList.add("fresh");
+      board.appendChild(el);
+      const w = { el, kind, r: Math.floor(slot / WD), c: slot % WD };
+      wallLayer.push(w);
+      if (kind === "h") layoutH(el, w.r, w.c, 3); else layoutV(el, w.r, w.c, 3);
+    }
+  }
+
+  // piyonlar + legal işaretleri
+  for (let i = 0; i < N * N; i++) { cells[i].innerHTML = ""; cells[i].classList.remove("legal"); }
+  for (const s of hslots) s.classList.remove("legal");
+  for (const s of vslots) s.classList.remove("legal");
+
+  for (const [idx, who] of [[state.pawn[0], "A"], [state.pawn[1], "B"]]) {
+    const p = document.createElement("div");
+    p.className = "pawn " + who;
+    p.textContent = who;
+    cells[idx].appendChild(p);
+  }
+
+  const myTurn = humanSide() !== null && String(state.side) === humanSide() && state.winner === null;
+  if (myTurn) {
+    for (const m of state.moves) {
+      if (m.kind === "p") cells[m.to].classList.add("legal");
+      else if (m.kind === "h") hslots[m.slot].classList.add("legal");
+      else vslots[m.slot].classList.add("legal");
+    }
+  }
+
+  // durum
+  const turn = state.side === 0 ? "A" : "B";
+  let st;
+  if (state.winner !== null) st = `<b>${state.winner === 0 ? "A" : "B"} kazandı.</b>`;
+  else if (busy) st = `<span class="thinking">${turn} düşünüyor…</span>`;
+  else st = `Sıra: <span class="chip${turn}">${turn}</span>${myTurn ? " — senin hamlen" : ""}`;
+  $("status").innerHTML = st;
+  $("sA").textContent = `duvar ${state.walls[0]} · hedefe ${state.dist[0] ?? "-"}`;
+  $("sB").textContent = `duvar ${state.walls[1]} · hedefe ${state.dist[1] ?? "-"}`;
+  $("hist").textContent = names.length ? names.join(" ") : "—";
+  $("fen").value = state.fen;
+}
+
+// -------------------------------------------------- ağ
+async function get(path, params) {
+  const q = new URLSearchParams(params).toString();
+  const r = await fetch(path + "?" + q);
+  const j = await r.json();
+  if (j.error) throw new Error(j.error);
+  return j;
+}
+
+async function refresh() {
+  state = await get("/api/state", { fen: history[history.length - 1] });
+  render();
+}
+
+function humanSide() { const v = $("you").value; return v === "none" ? null : v; }
+// Maç modunda her oyunda renkler değişiyor: aynı açılışı iki renkle de
+// oynamak, "A hep ilk oynuyor" avantajını ölçümden temizliyor.
+let swapEng = false;
+function engineFor(side) {
+  const s = swapEng ? 1 - side : side;
+  return s === 0 ? $("engA").value : $("engB").value;
+}
+
+async function push(fen, name) {
+  history.push(fen);
+  if (name) names.push(name);
+  await refresh();
+}
+
+async function onCell(i) {
+  if (busy || !state) return;
+  const m = state.moves.find(m => m.kind === "p" && m.to === i);
+  if (!m || !myTurnNow()) return;
+  await playMove(m);
+}
+
+async function onSlot(kind, slot) {
+  if (busy || !state) return;
+  const m = state.moves.find(m => m.kind === kind && m.slot === slot);
+  if (!m || !myTurnNow()) return;
+  await playMove(m);
+}
+
+function myTurnNow() {
+  return humanSide() !== null && String(state.side) === humanSide() && state.winner === null;
+}
+
+async function playMove(m) {
+  preview.style.display = "none";
+  lastMoveSlot = m.kind === "p" ? null : { kind: m.kind, slot: m.slot };
+  try {
+    const r = await get("/api/apply", { fen: state.fen, move: m.id });
+    await push(r.fen, r.played);
+    await runEngines();
+  } catch (e) { showError(e); }
+}
+
+async function runEngines() {
+  // Sırası motorda olduğu sürece oynat (izleyici modunda oyun sonuna kadar).
+  while (state.winner === null && !myTurnNow()) {
+    busy = true; render();
+    try {
+      const spec = engineFor(state.side);
+      const r = await get("/api/bot", { fen: state.fen, engine: spec });
+      lastMoveSlot = null;
+      const m = state.moves.find(x => x.id === r.id);
+      if (m && m.kind !== "p") lastMoveSlot = { kind: m.kind, slot: m.slot };
+      showBot(r);
+      busy = false;
+      await push(r.fen, r.name);
+    } catch (e) { busy = false; showError(e); return; }
+    if (humanSide() === null) {
+      const d = +$("hiz").value;
+      if (d > 0) await new Promise(res => setTimeout(res, d));
+    }
+  }
+  busy = false; render();
+}
+
+function showBot(r) {
+  $("botinfo").innerHTML =
+    `<b>${r.name}</b> · ${r.engine} · ${r.info} · ${r.work.toLocaleString("tr")} iş · ${r.elapsed.toFixed(2)} sn`;
+  const tab = $("toptab"), body = tab.querySelector("tbody");
+  body.innerHTML = "";
+  if (r.top && r.top.length) {
+    tab.style.display = "";
+    for (const t of r.top) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${t.name}</td><td class="num">${t.visits.toLocaleString("tr")}</td><td class="num">${(t.wr * 100).toFixed(1)}%</td>`;
+      body.appendChild(tr);
+    }
+  } else tab.style.display = "none";
+}
+
+function showError(e) {
+  $("status").innerHTML = `<span class="err">${e.message}</span>`;
+}
+
+// -------------------------------------------------- kontroller
+function fillEngines() {
+  for (const sel of [$("engA"), $("engB")]) {
+    for (const [v, label] of ENGINES) {
+      const o = document.createElement("option");
+      o.value = v; o.textContent = label;
+      sel.appendChild(o);
+    }
+  }
+  $("engA").value = "mcts:300000:t=0";
+  $("engB").value = "mcts:300000:t=0";
+}
+
+async function newGame() {
+  history = [START];
+  names.length = 0;
+  lastMoveSlot = null;
+  $("botinfo").textContent = "henüz arama yok";
+  $("toptab").style.display = "none";
+  await refresh();
+  await runEngines();
+}
+
+// -------------------------------------------------- canlı deney tablosu
+// deney.bat calisirken deney/ klasorunu okuyup her deneyin toplam skorunu
+// gosteriyor. Parcali kosuyor: bir deney N surece bolunmus oluyor, sunucu
+// tarafi onlari topluyor.
+
+/// Wilson %95 guven araligi. Normal yaklasim kucuk n'de %100'un ustune
+/// tasip "kazanma orani %105" gibi sacmaliklar uretiyor; Wilson uretmiyor.
+function wilson(a, n) {
+  if (!n) return [0, 100];
+  const p = a / n, z = 1.96, d = 1 + z * z / n;
+  const mer = (p + z * z / (2 * n)) / d;
+  const yay = z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d;
+  return [Math.max(0, mer - yay) * 100, Math.min(1, mer + yay) * 100];
+}
+
+function eloOf(p) {
+  if (p <= 0) return "-∞";
+  if (p >= 1) return "+∞";
+  const e = -400 * Math.log10(1 / p - 1);
+  return (e >= 0 ? "+" : "") + e.toFixed(0);
+}
+
+let deneyTimer = null;
+
+async function deneyYenile() {
+  let d;
+  try { d = await get("/api/deney", {}); } catch (e) { return; }
+  const list = d.deneyler || [];
+  if (!list.length) { $("deneykart").style.display = "none"; return; }
+  $("deneykart").style.display = "";
+
+  const bitenParca = list.reduce((t, x) => t + x.biten, 0);
+  const toplamParca = list.reduce((t, x) => t + x.parca, 0);
+  const oyun = list.reduce((t, x) => t + x.a + x.b, 0);
+  $("deneynot").textContent =
+    `· ${oyun} oyun · ${bitenParca}/${toplamParca} parça bitti` +
+    (bitenParca === toplamParca ? " · TAMAM" : "");
+
+  let html = '<table id="deneytab"><thead><tr><th>deney</th><th class="num">skor</th>' +
+    '<th class="num">A %</th><th class="num">%95 aralık</th><th class="num">Elo</th></tr></thead><tbody>';
+  for (const x of list) {
+    const n = x.a + x.b;
+    const p = n ? x.a / n : 0;
+    const [lo, hi] = wilson(x.a, n);
+    // Aralik 50'yi kesiyorsa sonuc henuz bir sey soylemiyor.
+    const kesin = n > 0 && (hi < 50 || lo > 50);
+    const renk = !kesin ? "var(--dim)" : (p > 0.5 ? "#5ec98a" : "#e06c6c");
+    const ad = x.ad.replace(/^\d+-/, "").replace(/-/g, " ");
+    html += `<tr><td>${ad}${x.biten < x.parca ? " <span style='color:var(--dim)'>…</span>" : ""}</td>` +
+      `<td class="num">${x.a}-${x.b}</td>` +
+      `<td class="num" style="color:${renk};font-weight:600">${n ? (p * 100).toFixed(1) : "—"}</td>` +
+      `<td class="num" style="color:var(--dim)">${n ? lo.toFixed(0) + "–" + hi.toFixed(0) : "—"}</td>` +
+      `<td class="num" style="color:${renk}">${n ? eloOf(p) : "—"}</td></tr>`;
+  }
+  html += "</tbody></table>";
+  $("deneywrap").innerHTML = html;
+}
+
+function deneyIzle() {
+  if (deneyTimer) clearInterval(deneyTimer);
+  deneyYenile();
+  deneyTimer = setInterval(deneyYenile, 5000);
+}
+
+// -------------------------------------------------- maç modu
+let macKosuyor = false;
+let skor = { a: 0, b: 0, yarim: 0, oyun: 0 };
+
+function skorYaz(ek) {
+  const oynanan = skor.a + skor.b;
+  const oran = oynanan ? (100 * skor.a / oynanan).toFixed(1) + "%" : "—";
+  $("skor").innerHTML =
+    `<b>A ${skor.a} – ${skor.b} B</b> · ${skor.oyun}. oyun · A kazanma ${oran}` +
+    (skor.yarim ? ` · ${skor.yarim} bitmedi` : "") +
+    (ek ? `<br>${ek}` : "");
+}
+
+/// Rastgele açılış: ilk N yarım hamleyi legal hamleler arasından seçiyor.
+/// Değer yaprağı kullanan arama deterministik olduğu için standart
+/// açılıştan oynanan 20 oyun tek bir oyunla aynı sonucu verir — çeşitlilik
+/// buradan geliyor.
+async function rastgeleAcilis(plies) {
+  for (let k = 0; k < plies; k++) {
+    const st = await get("/api/state", { fen: history[history.length - 1] });
+    if (st.winner !== null || !st.moves.length) break;
+    const m = st.moves[Math.floor(Math.random() * st.moves.length)];
+    const r = await get("/api/apply", { fen: st.fen, move: m.id });
+    history.push(r.fen); names.push(r.played);
+  }
+  await refresh();
+}
+
+async function macDongusu() {
+  $("you").value = "none";
+  skor = { a: 0, b: 0, yarim: 0, oyun: 0 };
+  const plies = +$("acilis").value;
+  while (macKosuyor) {
+    skor.oyun++;
+    // Her oyunda renk değişiyor; açılış her iki oyunda bir yenileniyor.
+    swapEng = skor.oyun % 2 === 0;
+    skorYaz(`renkler: A motoru = ${swapEng ? "üstteki B" : "alttaki A"}`);
+    history = [START]; names.length = 0; lastMoveSlot = null;
+    await refresh();
+    if (plies > 0) await rastgeleAcilis(plies);
+    await runEngines();
+    if (!macKosuyor) break;
+    if (state.winner === null) skor.yarim++;
+    else if (state.winner === (swapEng ? 1 : 0)) skor.a++;
+    else skor.b++;
+    skorYaz();
+    await new Promise(res => setTimeout(res, 500));
+  }
+  swapEng = false;
+  skorYaz("durdu");
+}
+
+$("macbas").onclick = () => {
+  if (macKosuyor) return;
+  macKosuyor = true;
+  macDongusu().catch(e => { macKosuyor = false; showError(e); });
+};
+$("macdur").onclick = () => { macKosuyor = false; skorYaz("durduruluyor…"); };
+
+$("new").onclick = () => { macKosuyor = false; newGame().catch(showError); };
+$("undo").onclick = async () => {
+  if (busy) return;
+  // İnsan hamlesine kadar geri sar (motor cevabını da al).
+  const back = humanSide() === null ? 1 : 2;
+  for (let k = 0; k < back && history.length > 1; k++) { history.pop(); names.pop(); }
+  lastMoveSlot = null;
+  await refresh();
+};
+$("flip").onclick = () => { flipped = !flipped; relayout(); labels(); render(); };
+$("hint").onclick = async () => {
+  if (busy || !state || state.winner !== null) return;
+  busy = true; render();
+  try {
+    const r = await get("/api/bot", { fen: state.fen, engine: engineFor(state.side) });
+    showBot(r);
+  } catch (e) { showError(e); }
+  busy = false; render();
+};
+$("you").onchange = () => newGame().catch(showError);
+$("load").onclick = async () => {
+  const f = $("fen").value.trim();
+  try {
+    const s = await get("/api/state", { fen: f });
+    history = [s.fen]; names.length = 0; lastMoveSlot = null;
+    state = s; render();
+    await runEngines();
+  } catch (e) { showError(e); }
+};
+$("copy").onclick = () => navigator.clipboard.writeText($("fen").value);
+
+async function loadCores() {
+  try { CORES = (await get("/api/cores", {})).cores || 1; } catch (e) { CORES = 1; }
+}
+
+// Turnuva sonuclari: hangi motor ne kadar guclu.
+async function loadRatings() {
+  let r;
+  try { r = await get("/api/ratings", {}); } catch (e) { r = { engines: [] }; }
+  const wrap = $("elowrap");
+  if (!r.engines || !r.engines.length) {
+    wrap.innerHTML = 'Turnuva sonucu yok. Uretmek icin:<br>' +
+      '<code style="font-size:11px">gedik tournament 4 mcts:20000 ab:300ms</code>';
+    return;
+  }
+  const elos = r.engines.map(e => e.elo);
+  const lo = Math.min(...elos), hi = Math.max(...elos), span = Math.max(1, hi - lo);
+  let html = '<table id="elotab"><thead><tr><th></th><th>motor</th>' +
+             '<th class="num">Elo</th><th class="num">skor</th></tr></thead><tbody>';
+  for (const e of r.engines) {
+    const w = Math.round(6 + 94 * (e.elo - lo) / span);
+    html += `<tr>
+      <td class="rank">${e.rank}</td>
+      <td class="eng" data-spec="${e.spec}" title="tiklayinca iki tarafa da atanir">
+        ${e.spec}<div class="bar" style="width:${w}%"></div></td>
+      <td class="num">${e.elo > 0 ? "+" : ""}${e.elo} <span style="opacity:.5">±${e.err}</span></td>
+      <td class="num">${(e.score * 100).toFixed(0)}%</td></tr>`;
+  }
+  html += "</tbody></table>";
+  wrap.innerHTML = html;
+  $("elonote").textContent = ` · ${r.engines[0].games} maç/motor`;
+  wrap.insertAdjacentHTML("beforeend",
+    '<div style="color:var(--dim);font-size:11px;margin-top:8px;line-height:1.45">' +
+    'Sabit iterasyon bütçeleriyle ölçüldü. Pratikte en güçlü ayar süre bütçeli ' +
+    've tüm çekirdekleri kullanan seçenek: <b>MCTS 3 sn</b>. Alt sıradakiler ' +
+    'ablasyon — <code>mctsu</code> policy prior yok, <code>mctsr</code> rastgele ' +
+    'rollout, <code>ab</code> alpha-beta baseline.</div>');
+  wrap.querySelectorAll("td.eng").forEach(td => {
+    td.onclick = () => {
+      const spec = td.dataset.spec;
+      for (const sel of [$("engA"), $("engB")]) {
+        if (![...sel.options].some(o => o.value === spec)) {
+          const o = document.createElement("option");
+          o.value = spec; o.textContent = spec;
+          sel.appendChild(o);
+        }
+        sel.value = spec;
+      }
+    };
+  });
+}
+
+fillEngines();
+build();
+loadCores().then(loadRatings).catch(() => {});
+deneyIzle();
+newGame().catch(showError);
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "pairs": 3,
+  "engines": [
+    {"rank": 1, "spec": "mcts:60000", "elo": 263, "err": 21, "score": 0.8333, "games": 36, "wins": 30, "losses": 6},
+    {"rank": 2, "spec": "mctsh:20000", "elo": 100, "err": 27, "score": 0.6389, "games": 36, "wins": 23, "losses": 13},
+    {"rank": 3, "spec": "mcts:20000", "elo": 89, "err": 27, "score": 0.6250, "games": 36, "wins": 22, "losses": 13},
+    {"rank": 4, "spec": "mcts:5000", "elo": 9, "err": 28, "score": 0.5139, "games": 36, "wins": 18, "losses": 17},
+    {"rank": 5, "spec": "mctsu:20000", "elo": -60, "err": 28, "score": 0.4167, "games": 36, "wins": 15, "losses": 21},
+    {"rank": 6, "spec": "mctsr:20000", "elo": -165, "err": 25, "score": 0.2778, "games": 36, "wins": 10, "losses": 26},
+    {"rank": 7, "spec": "ab:300ms", "elo": -237, "err": 22, "score": 0.1944, "games": 36, "wins": 7, "losses": 29}
+  ]
+}
