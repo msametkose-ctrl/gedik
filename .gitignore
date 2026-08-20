@@ -1,0 +1,12 @@
+/target
+/deney
+/gece
+/veri
+/veri2
+/sezgi
+*.csv
+*.bin
+!ag.bin
+ratings.json
+__pycache__/
+*.pyc

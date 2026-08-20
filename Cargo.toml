@@ -1,0 +1,42 @@
+[package]
+name = "gedik"
+version = "0.1.0"
+edition = "2021"
+description = "A strong Quoridor engine: bitboards, PUCT search, and a small learned evaluation network"
+repository = "https://github.com/msametkose-ctrl/gedik"
+license = "MIT"
+readme = "README.md"
+keywords = ["quoridor", "game", "engine", "mcts", "board-game"]
+categories = ["games", "algorithms"]
+
+[dependencies]
+# Bilerek sifir bagimlilik. Sunucu std::net uzerine yazildi, sinir agi
+# ileri gecisi elle yazildi. `cargo build` internetsiz calisiyor ve
+# tedarik zincirinde guvenilecek kimse yok.
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[[bin]]
+name = "gedik"
+path = "src/bin/gedik.rs"
+
+# --- egitim boru hatti ---------------------------------------------------
+[[bin]]
+name = "uret"           # self-play verisi uretir (pozisyon + sonuc + politika)
+path = "src/bin/uret.rs"
+
+[[bin]]
+name = "kodla"          # CSV -> egitime hazir ikili
+path = "src/bin/kodla.rs"
+
+# --- teshis --------------------------------------------------------------
+[[bin]]
+name = "analiz"         # bir hamle listesini oynatip motorun degerlendirmesini basar
+path = "src/bin/analiz.rs"
+
+[[bin]]
+name = "savun"          # "rakip tek duvarla yolumu ne kadar uzatir" tablosu
+path = "src/bin/savun.rs"
