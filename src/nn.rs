@@ -307,18 +307,66 @@ impl Linear {
 }
 
 #[derive(Clone)]
+pub struct SeBlock {
+    pub fc1: Linear,
+    pub fc2: Linear,
+}
+
+impl SeBlock {
+    pub fn forward(&self, input: &[f32], output: &mut [f32], channels: usize) {
+        let mut pooled = [0.0f32; 64];
+        let p_slice = &mut pooled[..channels];
+        for c in 0..channels {
+            let plane = &input[c * CELLS..][..CELLS];
+            let sum: f32 = plane.iter().sum();
+            p_slice[c] = sum / (CELLS as f32);
+        }
+
+        let r_dim = (channels / 4).max(1);
+        let mut fc1_out = [0.0f32; 16];
+        self.fc1.forward(p_slice, &mut fc1_out[..r_dim]);
+        for x in &mut fc1_out[..r_dim] {
+            *x = x.max(0.0);
+        }
+
+        let mut scale = [0.0f32; 64];
+        let s_slice = &mut scale[..channels];
+        self.fc2.forward(&fc1_out[..r_dim], s_slice);
+        for s in s_slice.iter_mut() {
+            *s = 1.0 / (1.0 + (-*s).exp());
+        }
+
+        for c in 0..channels {
+            let sc = s_slice[c];
+            let in_plane = &input[c * CELLS..][..CELLS];
+            let out_plane = &mut output[c * CELLS..][..CELLS];
+            for i in 0..CELLS {
+                out_plane[i] = in_plane[i] * sc;
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct ResBlock {
     pub conv1: Conv2d3x3,
     pub conv2: Conv2d3x3,
+    pub se: Option<SeBlock>,
 }
 
 impl ResBlock {
-    pub fn forward(&self, input: &[f32], output: &mut [f32], scratch: &mut [f32]) {
+    pub fn forward(&self, input: &[f32], output: &mut [f32], scratch: &mut [f32], channels: usize) {
         self.conv1.forward(input, scratch);
         for x in scratch.iter_mut() {
             *x = x.max(0.0);
         }
         self.conv2.forward(scratch, output);
+
+        if let Some(se) = &self.se {
+            scratch.copy_from_slice(output);
+            se.forward(scratch, output, channels);
+        }
+
         for (out, &inp) in output.iter_mut().zip(input) {
             *out = (*out + inp).max(0.0);
         }
@@ -341,13 +389,14 @@ pub struct ResNet {
     pub delta_conv: Option<Conv2d1x1>,
     pub delta_fc1: Option<Linear>,
     pub delta_fc2: Option<Linear>,
+    pub heatmap_conv: Option<Conv2d1x1>,
 }
 
 impl ResNet {
     pub fn value(&self, pos: &Position) -> f32 {
         let planes = spatial_planes(pos);
         let ch = self.channels;
-        const MAX_BUF: usize = 32 * CELLS;
+        const MAX_BUF: usize = 64 * CELLS;
         let mut buf1 = [0.0f32; MAX_BUF];
         let mut buf2 = [0.0f32; MAX_BUF];
         let mut scratch = [0.0f32; MAX_BUF];
@@ -364,7 +413,7 @@ impl ResNet {
 
         // ResBlocks
         for block in &self.blocks {
-            block.forward(cur_buf1, cur_buf2, cur_scratch);
+            block.forward(cur_buf1, cur_buf2, cur_scratch, ch);
             cur_buf1.copy_from_slice(cur_buf2);
         }
 
@@ -393,7 +442,7 @@ impl ResNet {
 
         let planes = spatial_planes(pos);
         let ch = self.channels;
-        const MAX_BUF: usize = 32 * CELLS;
+        const MAX_BUF: usize = 64 * CELLS;
         let mut buf1 = [0.0f32; MAX_BUF];
         let mut buf2 = [0.0f32; MAX_BUF];
         let mut scratch = [0.0f32; MAX_BUF];
@@ -408,7 +457,7 @@ impl ResNet {
         }
 
         for block in &self.blocks {
-            block.forward(cur_buf1, cur_buf2, cur_scratch);
+            block.forward(cur_buf1, cur_buf2, cur_scratch, ch);
             cur_buf1.copy_from_slice(cur_buf2);
         }
 
@@ -429,6 +478,37 @@ impl ResNet {
             } else {
                 out.push(0.0);
             }
+        }
+        Some(out)
+    }
+
+    pub fn heatmap(&self, pos: &Position) -> Option<[f32; CELLS]> {
+        let h_conv = self.heatmap_conv.as_ref()?;
+        let planes = spatial_planes(pos);
+        let ch = self.channels;
+        const MAX_BUF: usize = 64 * CELLS;
+        let mut buf1 = [0.0f32; MAX_BUF];
+        let mut buf2 = [0.0f32; MAX_BUF];
+        let mut scratch = [0.0f32; MAX_BUF];
+
+        let cur_buf1 = &mut buf1[..ch * CELLS];
+        let cur_buf2 = &mut buf2[..ch * CELLS];
+        let cur_scratch = &mut scratch[..ch * CELLS];
+
+        self.init_conv.forward(&planes, cur_buf1);
+        for x in cur_buf1.iter_mut() {
+            *x = x.max(0.0);
+        }
+
+        for block in &self.blocks {
+            block.forward(cur_buf1, cur_buf2, cur_scratch, ch);
+            cur_buf1.copy_from_slice(cur_buf2);
+        }
+
+        let mut out = [0.0f32; CELLS];
+        h_conv.forward(cur_buf1, &mut out);
+        for x in out.iter_mut() {
+            *x = 1.0 / (1.0 + (-*x).exp()); // Sigmoid reachability map
         }
         Some(out)
     }
@@ -603,14 +683,19 @@ impl Net {
             Some(Net {
                 kind: NetKind::Mlp(MlpNet { h1, h2, pol, w1, b1, w2, b2, w3, b3 }),
             })
-        } else if magic == b"QNN2" || magic == b"QNN3" {
+        } else if magic == b"QNN2" || magic == b"QNN3" || magic == b"QNN4" {
             let is_qnn3 = magic == b"QNN3";
+            let is_qnn4 = magic == b"QNN4";
             let rd_u32 = |o: usize| {
                 u32::from_le_bytes([buf[o], buf[o + 1], buf[o + 2], buf[o + 3]]) as usize
             };
             let channels = rd_u32(4);
             let n_blocks = rd_u32(8);
-            let has_policy = rd_u32(12) != 0;
+            let flags = rd_u32(12);
+            let has_policy = if is_qnn4 { (flags & 1) != 0 } else { flags != 0 };
+            let has_katago = if is_qnn4 { (flags & 2) != 0 } else { is_qnn3 };
+            let has_se = if is_qnn4 { (flags & 4) != 0 } else { false };
+            let has_heatmap = if is_qnn4 { (flags & 8) != 0 } else { false };
 
             let mut o = 16;
             fn take(buf: &[u8], o: &mut usize, n: usize) -> Vec<f32> {
@@ -632,14 +717,30 @@ impl Net {
             };
 
             let mut blocks = Vec::with_capacity(n_blocks);
+            let r_dim = (channels / 4).max(1);
             for _ in 0..n_blocks {
                 let c1_w = take(buf, &mut o, channels * channels * 9);
                 let c1_b = take(buf, &mut o, channels);
                 let c2_w = take(buf, &mut o, channels * channels * 9);
                 let c2_b = take(buf, &mut o, channels);
+
+                let se = if has_se {
+                    let se_f1w = take(buf, &mut o, r_dim * channels);
+                    let se_f1b = take(buf, &mut o, r_dim);
+                    let se_f2w = take(buf, &mut o, channels * r_dim);
+                    let se_f2b = take(buf, &mut o, channels);
+                    Some(SeBlock {
+                        fc1: Linear { in_f: channels, out_f: r_dim, weights: se_f1w, bias: se_f1b },
+                        fc2: Linear { in_f: r_dim, out_f: channels, weights: se_f2w, bias: se_f2b },
+                    })
+                } else {
+                    None
+                };
+
                 blocks.push(ResBlock {
                     conv1: Conv2d3x3 { in_c: channels, out_c: channels, weights: c1_w, bias: c1_b },
                     conv2: Conv2d3x3 { in_c: channels, out_c: channels, weights: c2_w, bias: c2_b },
+                    se,
                 });
             }
 
@@ -669,7 +770,7 @@ impl Net {
                 (None, None)
             };
 
-            let (moves_conv, moves_fc1, moves_fc2, delta_conv, delta_fc1, delta_fc2) = if is_qnn3 {
+            let (moves_conv, moves_fc1, moves_fc2, delta_conv, delta_fc1, delta_fc2) = if has_katago {
                 let mc_w = take(buf, &mut o, 1 * channels);
                 let mc_b = take(buf, &mut o, 1);
                 let mconv = Conv2d1x1 { in_c: channels, out_c: 1, weights: mc_w, bias: mc_b };
@@ -696,6 +797,15 @@ impl Net {
                 (None, None, None, None, None, None)
             };
 
+            let heatmap_conv = if has_heatmap {
+                let hc_w = take(buf, &mut o, 1 * channels);
+                let hc_b = take(buf, &mut o, 1);
+                eprintln!("  (9x9 Ulaşılabilirlik Isı Haritası başlığı yüklendi)");
+                Some(Conv2d1x1 { in_c: channels, out_c: 1, weights: hc_w, bias: hc_b })
+            } else {
+                None
+            };
+
             Some(Net {
                 kind: NetKind::Res(ResNet {
                     channels,
@@ -712,6 +822,7 @@ impl Net {
                     delta_conv,
                     delta_fc1,
                     delta_fc2,
+                    heatmap_conv,
                 }),
             })
         } else {
@@ -737,6 +848,13 @@ impl Net {
         match &self.kind {
             NetKind::Mlp(m) => m.value(pos, scratch),
             NetKind::Res(r) => r.value(pos),
+        }
+    }
+
+    pub fn heatmap(&self, pos: &Position) -> Option<[f32; CELLS]> {
+        match &self.kind {
+            NetKind::Mlp(_) => None,
+            NetKind::Res(r) => r.heatmap(pos),
         }
     }
 }

@@ -96,34 +96,56 @@ class Ag(nn.Module):
         return v, p
 
 
+class SELayerPyTorch(nn.Module):
+    def __init__(self, channels, reduction=4):
+        super().__init__()
+        r_dim = max(1, channels // reduction)
+        self.fc1 = nn.Linear(channels, r_dim)
+        self.fc2 = nn.Linear(r_dim, channels)
+        self.relu = nn.ReLU(inplace=True)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        b, c, _, _ = x.size()
+        y = x.view(b, c, -1).mean(dim=2)
+        y = self.relu(self.fc1(y))
+        y = self.sigmoid(self.fc2(y)).view(b, c, 1, 1)
+        return x * y
+
+
 class ResBlockPyTorch(nn.Module):
-    def __init__(self, channels):
+    def __init__(self, channels, se=True):
         super().__init__()
         self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
         self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        self.se = SELayerPyTorch(channels) if se else None
         self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x):
         res = x
         out = self.relu(self.conv1(x))
         out = self.conv2(out)
+        if self.se is not None:
+            out = self.se(out)
         out = self.relu(out + res)
         return out
 
 
 class AgResNet(nn.Module):
-    """2B Uzamsal ResNet Modeli (KataGo Çoklu Hedef Destekli)."""
+    """2B Uzamsal SE-ResNet Modeli (KataGo Çoklu Hedef + 5. Isı Haritası Başlığı)."""
 
-    def __init__(self, in_channels=13, channels=32, n_blocks=2, politika=True, katago=True):
+    def __init__(self, in_channels=13, channels=64, n_blocks=8, se=True, politika=True, katago=True, heatmap=True):
         super().__init__()
         self.channels = channels
         self.n_blocks = n_blocks
+        self.se = se
         self.katago = katago
+        self.heatmap = heatmap
         self.init_conv = nn.Sequential(
             nn.Conv2d(in_channels, channels, kernel_size=3, padding=1),
             nn.ReLU(inplace=True)
         )
-        self.blocks = nn.ModuleList([ResBlockPyTorch(channels) for _ in range(n_blocks)])
+        self.blocks = nn.ModuleList([ResBlockPyTorch(channels, se=se) for _ in range(n_blocks)])
         
         # Value head: 1x1 conv (channels -> 2) -> Linear(162 -> 32) -> Linear(32 -> 1)
         self.val_conv = nn.Sequential(
@@ -172,6 +194,13 @@ class AgResNet(nn.Module):
             self.moves_conv, self.moves_fc1, self.moves_fc2 = None, None, None
             self.delta_conv, self.delta_fc1, self.delta_fc2 = None, None, None
 
+        if heatmap:
+            self.heat_conv = nn.Sequential(
+                nn.Conv2d(channels, 1, kernel_size=1)
+            )
+        else:
+            self.heat_conv = None
+
     def forward(self, x):
         feat = self.init_conv(x)
         for block in self.blocks:
@@ -184,37 +213,22 @@ class AgResNet(nn.Module):
         p = self.pol_fc(self.pol_conv(feat).flatten(1)) if self.pol_conv is not None else None
         m = self.moves_fc2(self.moves_fc1(self.moves_conv(feat).flatten(1))).squeeze(-1) if self.moves_conv is not None else None
         d = self.delta_fc2(self.delta_fc1(self.delta_conv(feat).flatten(1))).squeeze(-1) if self.delta_conv is not None else None
+        h = torch.sigmoid(self.heat_conv(feat).flatten(1)) if self.heat_conv is not None else None
 
-        return v, p, m, d
-
-
-def yaz(model, yol, n_in, h1, h2):
-    """MLP modelini QNN1 formatında kaydeder."""
-    with open(yol, "wb") as f:
-        f.write(b"QNN1")
-        f.write(struct.pack("<III", n_in, h1, h2))
-        parcalar = [
-            model.l1.weight.detach().cpu().numpy().T,
-            model.l1.bias.detach().cpu().numpy(),
-            model.l2.weight.detach().cpu().numpy().T,
-            model.l2.bias.detach().cpu().numpy(),
-            model.l3.weight.detach().cpu().numpy().reshape(-1),
-            model.l3.bias.detach().cpu().numpy(),
-        ]
-        if model.pol is not None:
-            parcalar.append(model.pol.weight.detach().cpu().numpy().T)
-            parcalar.append(model.pol.bias.detach().cpu().numpy())
-        for t in parcalar:
-            f.write(np.ascontiguousarray(t, dtype="<f4").tobytes())
+        return v, p, m, d, h
 
 
 def yaz_resnet(model, yol):
-    """ResNet modelini QNN3 (KataGo) veya QNN2 formatında kaydeder."""
+    """ResNet modelini QNN4 (SE-ResNet + KataGo + Isı Haritası) formatında kaydeder."""
     with open(yol, "wb") as f:
-        magic = b"QNN3" if model.katago else b"QNN2"
+        magic = b"QNN4"
         f.write(magic)
-        has_pol = 1 if model.pol_conv is not None else 0
-        f.write(struct.pack("<III", model.channels, model.n_blocks, has_pol))
+        flags = 0
+        if model.pol_conv is not None: flags |= 1
+        if model.katago: flags |= 2
+        if model.se: flags |= 4
+        if model.heat_conv is not None: flags |= 8
+        f.write(struct.pack("<III", model.channels, model.n_blocks, flags))
         
         parcalar = [
             model.init_conv[0].weight.detach().cpu().numpy(),
@@ -225,6 +239,11 @@ def yaz_resnet(model, yol):
             parcalar.append(b.conv1.bias.detach().cpu().numpy())
             parcalar.append(b.conv2.weight.detach().cpu().numpy())
             parcalar.append(b.conv2.bias.detach().cpu().numpy())
+            if b.se is not None:
+                parcalar.append(b.se.fc1.weight.detach().cpu().numpy())
+                parcalar.append(b.se.fc1.bias.detach().cpu().numpy())
+                parcalar.append(b.se.fc2.weight.detach().cpu().numpy())
+                parcalar.append(b.se.fc2.bias.detach().cpu().numpy())
         
         parcalar.extend([
             model.val_conv[0].weight.detach().cpu().numpy().reshape(2, model.channels),
@@ -235,7 +254,7 @@ def yaz_resnet(model, yol):
             model.val_fc2.bias.detach().cpu().numpy(),
         ])
         
-        if has_pol:
+        if model.pol_conv is not None:
             parcalar.extend([
                 model.pol_conv[0].weight.detach().cpu().numpy().reshape(4, model.channels),
                 model.pol_conv[0].bias.detach().cpu().numpy(),
@@ -259,18 +278,44 @@ def yaz_resnet(model, yol):
                 model.delta_fc2.bias.detach().cpu().numpy(),
             ])
 
+        if model.heat_conv is not None:
+            parcalar.extend([
+                model.heat_conv[0].weight.detach().cpu().numpy().reshape(1, model.channels),
+                model.heat_conv[0].bias.detach().cpu().numpy(),
+            ])
+
+        for t in parcalar:
+            f.write(np.ascontiguousarray(t, dtype="<f4").tobytes())
+
+
+def yaz(model, yol, n_in, h1, h2):
+    """MLP modelini QNN1 formatında kaydeder."""
+    with open(yol, "wb") as f:
+        f.write(b"QNN1")
+        f.write(struct.pack("<III", n_in, h1, h2))
+        parcalar = [
+            model.l1.weight.detach().cpu().numpy().T,
+            model.l1.bias.detach().cpu().numpy(),
+            model.l2.weight.detach().cpu().numpy().T,
+            model.l2.bias.detach().cpu().numpy(),
+            model.l3.weight.detach().cpu().numpy().reshape(-1),
+            model.l3.bias.detach().cpu().numpy(),
+        ]
+        if model.pol is not None:
+            parcalar.append(model.pol.weight.detach().cpu().numpy().T)
+            parcalar.append(model.pol.bias.detach().cpu().numpy())
         for t in parcalar:
             f.write(np.ascontiguousarray(t, dtype="<f4").tobytes())
 
 
 def model_yukle_resnet(model, yol):
-    """QNN2 veya QNN3 dosyasından ağırlıkları okuyup modele yükler."""
+    """QNN2/QNN3/QNN4 dosyasından ağırlıkları okuyup modele yükler."""
     with open(yol, "rb") as f:
         sihir = f.read(4)
-        if sihir not in (b"QNN2", b"QNN3"):
-            print(f"Uyarı: {yol} QNN2/QNN3 formatında değil, sıfırdan başlanıyor.")
+        if sihir not in (b"QNN2", b"QNN3", b"QNN4"):
+            print(f"Uyarı: {yol} QNN formatında değil, sıfırdan başlanıyor.")
             return
-        c, n_blocks, has_pol = struct.unpack("<III", f.read(12))
+        c, n_blocks, flags = struct.unpack("<III", f.read(12))
         if c != model.channels or n_blocks != model.n_blocks:
             print(f"Uyarı: Boyut uyumsuz ({c}k, {n_blocks}b != {model.channels}k, {model.n_blocks}b), sıfırdan başlanıyor.")
             return
@@ -285,11 +330,17 @@ def model_yukle_resnet(model, yol):
         model.init_conv[0].weight.data.copy_(oku_tensor(model.init_conv[0].weight.shape))
         model.init_conv[0].bias.data.copy_(oku_tensor(model.init_conv[0].bias.shape))
 
+        has_se = (flags & 4) != 0 if sihir == b"QNN4" else False
         for b in model.blocks:
             b.conv1.weight.data.copy_(oku_tensor(b.conv1.weight.shape))
             b.conv1.bias.data.copy_(oku_tensor(b.conv1.bias.shape))
             b.conv2.weight.data.copy_(oku_tensor(b.conv2.weight.shape))
             b.conv2.bias.data.copy_(oku_tensor(b.conv2.bias.shape))
+            if has_se and b.se is not None:
+                b.se.fc1.weight.data.copy_(oku_tensor(b.se.fc1.weight.shape))
+                b.se.fc1.bias.data.copy_(oku_tensor(b.se.fc1.bias.shape))
+                b.se.fc2.weight.data.copy_(oku_tensor(b.se.fc2.weight.shape))
+                b.se.fc2.bias.data.copy_(oku_tensor(b.se.fc2.bias.shape))
 
         model.val_conv[0].weight.data.copy_(oku_tensor((2, model.channels)).reshape(2, model.channels, 1, 1))
         model.val_conv[0].bias.data.copy_(oku_tensor((2,)))
@@ -298,6 +349,7 @@ def model_yukle_resnet(model, yol):
         model.val_fc2.weight.data.copy_(oku_tensor(model.val_fc2.weight.shape))
         model.val_fc2.bias.data.copy_(oku_tensor(model.val_fc2.bias.shape))
 
+        has_pol = (flags & 1) != 0 if sihir == b"QNN4" else (flags != 0)
         if has_pol and model.pol_conv is not None:
             model.pol_conv[0].weight.data.copy_(oku_tensor((4, model.channels)).reshape(4, model.channels, 1, 1))
             model.pol_conv[0].bias.data.copy_(oku_tensor((4,)))
@@ -314,7 +366,9 @@ def main():
     ap.add_argument("--h1", type=int, default=64)
     ap.add_argument("--h2", type=int, default=32)
     ap.add_argument("--channels", type=int, default=32, help="ResNet kanal sayisi")
-    ap.add_argument("--blocks", type=int, default=2, help="ResBlock sayisi")
+    ap.add_argument("--blocks", type=int, default=4, help="ResBlock sayisi")
+    ap.add_argument("--se", type=int, default=1, help="Squeeze-and-Excitation dikkati (1: acik, 0: kapali)")
+    ap.add_argument("--heatmap", type=int, default=1, help="9x9 Ulasilabilirlik Isi Haritasi basi (1: acik, 0: kapali)")
     ap.add_argument("--batch", type=int, default=2048)
     ap.add_argument("--lr", type=float, default=2e-3)
     ap.add_argument("--maxsatir", type=int, default=1_000_000)
@@ -354,8 +408,8 @@ def main():
             print(f"  [Replay Buffer] {g}: {n:,} pozisyon (katago={is_katago})", flush=True)
 
         politika_var = any(ds["has_p"] for ds in datasets) and not a.politikasiz
-        print(f"Model: 2B ResNet ({channels} kanal, {a.channels} filtre, {a.blocks} ResBlock, katago={any_katago})", flush=True)
-        model = AgResNet(in_channels=channels, channels=a.channels, n_blocks=a.blocks, politika=politika_var, katago=any_katago).to(dev)
+        print(f"Model: 2B SE-ResNet ({channels} kanal, {a.channels} filtre, {a.blocks} ResBlock, se={bool(a.se)}, katago={any_katago}, heatmap={bool(a.heatmap)})", flush=True)
+        model = AgResNet(in_channels=channels, channels=a.channels, n_blocks=a.blocks, se=bool(a.se), politika=politika_var, katago=any_katago, heatmap=bool(a.heatmap)).to(dev)
 
         if a.yukle:
             model_yukle_resnet(model, a.yukle)
@@ -445,7 +499,7 @@ def main():
                 bmask = torch.cat(bkat_mask, dim=0).to(dev, non_blocking=True)
 
                 opt.zero_grad(set_to_none=True)
-                v, p, m, d = model(bx)
+                v, p, m, d, h = model(bx)
                 kayip = kayip_fn(v, by)
 
                 if any_katago and m is not None and d is not None and bmask.any():
@@ -479,7 +533,7 @@ def main():
                 for s in range(0, val_n, batch_size * 2):
                     bx = val_x[s : s + batch_size * 2]
                     by = val_y[s : s + batch_size * 2]
-                    z, _, _, _ = model(bx)
+                    z, _, _, _, _ = model(bx)
                     dg_kayip += kayip_fn(z, by).item() * len(bx)
                     dogru += ((z > 0).float() == by).sum().item()
                     top += len(bx)
