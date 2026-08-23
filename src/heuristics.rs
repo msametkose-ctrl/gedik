@@ -234,6 +234,45 @@ pub fn race_winner(pos: &Position) -> usize {
     }
 }
 
+/// Duvarlar tükendiğinde veya saf yarışta tam kural piyon simülasyonu yaparak
+/// zıplama paritesi (piyon atlamaları) dahil kesin kazananı %100 doğrulukla hesaplar.
+pub fn exact_race_winner(pos: &Position) -> usize {
+    if let Some(w) = pos.winner() {
+        return w;
+    }
+    let m = pos.masks();
+    let fields = [m.distance_field(goal_row(0)), m.distance_field(goal_row(1))];
+    let mut cur = *pos;
+
+    for _ in 0..32 {
+        if let Some(w) = cur.winner() {
+            return w;
+        }
+        let side = cur.side as usize;
+        let field = &fields[side];
+        let mut pawn_moves = Vec::with_capacity(6);
+        cur.gen_pawn_moves(&m, &mut pawn_moves);
+        if pawn_moves.is_empty() {
+            return 1 - side;
+        }
+        // Hedefe en çok yaklaştıran (en kısa mesafeyi veren) hamleyi seç
+        let mut best_mv = pawn_moves[0];
+        let mut best_dist = u8::MAX;
+        for mv in pawn_moves {
+            if let MoveKind::Pawn(d) = mv.kind() {
+                let target = cur.pawn_target(d);
+                let dist = field[target];
+                if dist < best_dist {
+                    best_dist = dist;
+                    best_mv = mv;
+                }
+            }
+        }
+        cur.make(best_mv);
+    }
+    race_winner(pos)
+}
+
 /// Yaprak değerlendirmesi: sıradaki oyuncunun kazanma olasılığı, [0,1].
 ///
 /// Rollout'un yerine geçiyor. Gerekçe ölçümle: `wall_prob=0.30` ile saf
@@ -293,8 +332,8 @@ pub fn features(pos: &Position) -> [f32; NUM_FEATURES] {
     let phase = (w_me + w_opp) as f32 / 20.0;
 
     [
-        1.0,                // 0  sabit
-        tempo as f32 / 4.0, // 1  ham tempo
+        1.0,                                  // 0  sabit
+        tempo as f32 / 4.0,                   // 1  ham tempo
         // 2  duvar farkı — ama sadece yarış hâlâ kazanılabilirken.
         //    `opt < 0` iken duvarın hiçbir değeri yok; bunu modele
         //    söylemezsek doğrusal terim büyümeye devam ediyor ve arama
@@ -304,21 +343,22 @@ pub fn features(pos: &Position) -> [f32; NUM_FEATURES] {
         } else {
             0.0
         },
-        phase,                         // 3  oyun evresi
-        tempo as f32 / 4.0 * phase,    // 4  tempo x evre
-        (d_me + d_opp) as f32 / 16.0,  // 5  oyun ne kadar ilerledi
-        f32::from(w_opp == 0),         // 6  rakip engelleyemez
-        f32::from(w_me == 0),          // 7  biz engelleyemeyiz
-        opt.clamp(-6, 6) as f32 / 6.0, // 8  iyimser yarış
-        pes.clamp(-6, 6) as f32 / 6.0, // 9  kötümser yarış
-        f32::from(opt < 0),            // 10 duvarlarım yetmez -> kayıp
-        f32::from(pes > 0),            // 11 rakibin duvarı yetmez -> kazanç
+        phase,                                // 3  oyun evresi
+        tempo as f32 / 4.0 * phase,           // 4  tempo x evre
+        (d_me + d_opp) as f32 / 16.0,         // 5  oyun ne kadar ilerledi
+        f32::from(w_opp == 0),                // 6  rakip engelleyemez
+        f32::from(w_me == 0),                 // 7  biz engelleyemeyiz
+        opt.clamp(-6, 6) as f32 / 6.0,        // 8  iyimser yarış
+        pes.clamp(-6, 6) as f32 / 6.0,        // 9  kötümser yarış
+        f32::from(opt < 0),                   // 10 duvarlarım yetmez -> kayıp
+        f32::from(pes > 0),                   // 11 rakibin duvarı yetmez -> kazanç
     ]
 }
 
 /// Elle tahmin edilmiş ağırlıklar — karşılaştırma tabanı.
-pub const WEIGHTS_HAND: [f32; NUM_FEATURES] =
-    [0.0, 1.5, 1.0, 0.0, 0.0, 0.0, 0.3, -0.3, 2.0, 2.0, -3.0, 3.0];
+pub const WEIGHTS_HAND: [f32; NUM_FEATURES] = [
+    0.0, 1.5, 1.0, 0.0, 0.0, 0.0, 0.3, -0.3, 2.0, 2.0, -3.0, 3.0,
+];
 
 /// 26.319 self-play pozisyonundan lojistik regresyonla öğrenilmiş ağırlıklar.
 /// Doğrulama kümesinde doğruluk 0.667 -> 0.772, logloss 0.773 -> 0.461.
@@ -349,7 +389,8 @@ pub const WEIGHTS_HAND: [f32; NUM_FEATURES] =
 ///    dönülüyor), zayıf ceza da aramaya kaçış deliği açıyordu: motor cezanın
 ///    kalktığı bir yaprak bulup kaybedilmiş pozisyonu kazanılmış sanıyordu.
 pub const WEIGHTS_LEARNED: [f32; NUM_FEATURES] = [
-    0.28846, 0.97101, 2.4541, 0.0, 0.0, 0.068557, 0.0, 0.0, -1.3472, -0.96404, -2.5, 2.5,
+    0.28846, 0.97101, 2.4541, 0.0, 0.0, 0.068557, 0.0, 0.0,
+    -1.3472, -0.96404, -2.5, 2.5,
 ];
 
 /// Motorun kullandığı ağırlıklar.
@@ -496,16 +537,16 @@ pub fn playout(mut pos: Position, rng: &mut Rng, wall_prob: f32, max_ply: u16) -
             return w;
         }
         if pos.walls[0] == 0 && pos.walls[1] == 0 {
-            return race_winner(&pos);
+            return exact_race_winner(&pos);
         }
         if pos.ply >= max_ply {
-            return race_winner(&pos);
+            return exact_race_winner(&pos);
         }
         match playout_move(&pos, rng, wall_prob) {
             Some(mv) => {
                 pos.make(mv);
             }
-            None => return race_winner(&pos),
+            None => return exact_race_winner(&pos),
         }
     }
 }
@@ -583,14 +624,6 @@ fn walls_blocking(a: usize, b: usize) -> Vec<(usize, bool)> {
 /// mesafeyi artıramaz. Dolayısıyla 128 duvara değil, yolun üzerindeki
 /// kenarları kesen ~20 duvara bakmak yetiyor.
 ///
-/// **Değerlendirmede kullanılmıyor, bilerek.** Değer fonksiyonuna özellik
-/// olarak eklendi ve ölçüldü: eşit iterasyonda 12-12 (%50), yani hiçbir şey
-/// katmadı — üstelik yaprak başına maliyeti verimliliği 2.8 kat düşürüyordu.
-/// Sebebi sonradan anlaşıldı: arama zaten rakibin duvar hamlelerini deneyip
-/// sonuçtaki uzun yolu görüyor, yani bilgi aramada mevcut. Ayrıca gerçek
-/// oyundan alınan pozisyonlarda ölçtük ki tehdit ortaya çıktığında çoğu kez
-/// **savunulacak hamle kalmamış** oluyor; hata daha erken yapılıyor.
-///
 /// Teşhis aracı olarak duruyor: `tehdit` ve `savunma` ikilileri bunu kullanıyor.
 pub fn best_threat(pos: &Position, attacker: usize, victim: usize) -> u32 {
     if pos.walls[attacker] == 0 {
@@ -625,6 +658,78 @@ pub fn best_threat(pos: &Position, attacker: usize, victim: usize) -> u32 {
             };
             if let Some(after) = nm.distance_to_row(pos.pawn[victim] as usize, goal) {
                 worst = worst.max(after.saturating_sub(base));
+            }
+        }
+    }
+    worst
+}
+
+/// 2-Adımlı Tehdit Taraması: Saldırganın ardışık 2 duvar yerleştirerek mağdurun yolunu
+/// en fazla ne kadar uzatabileceğini (labirent tuzakları) hesaplar.
+pub fn best_threat_2step(pos: &Position, attacker: usize, victim: usize) -> u32 {
+    if pos.walls[attacker] < 2 {
+        return best_threat(pos, attacker, victim);
+    }
+    let m = pos.masks();
+    let goal = goal_row(victim);
+    let base = match m.distance_to_row(pos.pawn[victim] as usize, goal) {
+        Some(d) => d,
+        None => return 0,
+    };
+    let path = shortest_path_cells(&m, pos.pawn[victim] as usize, goal);
+
+    let mut seen_h = 0u64;
+    let mut seen_v = 0u64;
+    let mut worst = 0u32;
+
+    for w in path.windows(2) {
+        for (slot1, h1) in walls_blocking(w[0], w[1]) {
+            let bit1 = 1u64 << slot1;
+            let seen = if h1 { &mut seen_h } else { &mut seen_v };
+            if *seen & bit1 != 0 {
+                continue;
+            }
+            *seen |= bit1;
+            if !pos.wall_legal(slot1, h1) {
+                continue;
+            }
+            let (h_after1, v_after1) = if h1 {
+                (pos.h | bit1, pos.v)
+            } else {
+                (pos.h, pos.v | bit1)
+            };
+            let m1 = Masks::new(h_after1, v_after1);
+            let path1 = shortest_path_cells(&m1, pos.pawn[victim] as usize, goal);
+            
+            // 2. duvarı güncel en kısa yol boyunca dene
+            let mut seen_h2 = 0u64;
+            let mut seen_v2 = 0u64;
+            for w2 in path1.windows(2) {
+                for (slot2, h2) in walls_blocking(w2[0], w2[1]) {
+                    if h1 == h2 && slot1 == slot2 {
+                        continue;
+                    }
+                    let bit2 = 1u64 << slot2;
+                    let seen2 = if h2 { &mut seen_h2 } else { &mut seen_v2 };
+                    if *seen2 & bit2 != 0 {
+                        continue;
+                    }
+                    *seen2 |= bit2;
+                    
+                    let (h2_final, v2_final) = if h2 {
+                        (h_after1 | bit2, v_after1)
+                    } else {
+                        (h_after1, v_after1 | bit2)
+                    };
+                    // Basit çakışma ve dik kesişme kontrolü
+                    if (h2_final & v2_final & bit2) != 0 {
+                        continue;
+                    }
+                    let m2 = Masks::new(h2_final, v2_final);
+                    if let Some(after2) = m2.distance_to_row(pos.pawn[victim] as usize, goal) {
+                        worst = worst.max(after2.saturating_sub(base));
+                    }
+                }
             }
         }
     }
@@ -666,6 +771,43 @@ pub fn threat_features(pos: &Position) -> [f32; NUM_THREAT] {
     ]
 }
 
+/// Oyuncunun en kısa yolundaki kritik darboğazları (chokepoints) döner.
+/// Bu karelerdeki tek geçit kapatılırsa mesafe sıçrar.
+pub fn chokepoints(pos: &Position, player: usize) -> u128 {
+    let m = pos.masks();
+    let goal = goal_row(player);
+    let field = m.distance_field(goal);
+    let p_cell = pos.pawn[player] as usize;
+    let total_d = field[p_cell];
+    if total_d == 0 || total_d == u8::MAX {
+        return 0;
+    }
+    let mut cur_mask = bit(p_cell);
+    let mut choke = 0u128;
+    for k in (1..=total_d).rev() {
+        let want = k - 1;
+        let mut next_mask = 0u128;
+        let mut temp = cur_mask;
+        while temp != 0 {
+            let c = temp.trailing_zeros() as usize;
+            temp &= temp - 1;
+            for d in 0..4usize {
+                if m.step_open(c, d) {
+                    let target = (c as i32 + DIR_DELTA[d]) as usize;
+                    if field[target] == want {
+                        next_mask |= bit(target);
+                    }
+                }
+            }
+        }
+        if next_mask != 0 && next_mask.count_ones() == 1 && want > 0 {
+            choke |= next_mask;
+        }
+        cur_mask = next_mask;
+    }
+    choke
+}
+
 // ---------------------------------------------------------------- prior'lar
 
 /// Bir duvarın iki oyuncunun hedefe mesafesini nasıl değiştirdiği.
@@ -699,30 +841,25 @@ pub fn move_priors(pos: &Position, moves: &[Move]) -> Vec<f32> {
     let side = pos.side as usize;
     let opp = 1 - side;
     let m = pos.masks();
+    let field = m.distance_field(goal_row(side));
+    let cur_dist = field[pos.pawn[side] as usize];
     let base = [
-        m.distance_to_row(pos.pawn[0] as usize, goal_row(0))
-            .unwrap_or(99),
-        m.distance_to_row(pos.pawn[1] as usize, goal_row(1))
-            .unwrap_or(99),
+        m.distance_to_row(pos.pawn[0] as usize, goal_row(0)).unwrap_or(99),
+        m.distance_to_row(pos.pawn[1] as usize, goal_row(1)).unwrap_or(99),
     ];
-    let best_targets = {
-        let mut t = 0u128;
-        for &mv in moves {
-            if let MoveKind::Pawn(d) = mv.kind() {
-                t |= bit(pos.pawn_target(d));
-            }
-        }
-        m.closest_to_row(t, goal_row(side))
-    };
 
     let mut logits = Vec::with_capacity(moves.len());
     for &mv in moves {
         let s = match mv.kind() {
             MoveKind::Pawn(d) => {
-                if best_targets & bit(pos.pawn_target(d)) != 0 {
-                    2.0
+                let target = pos.pawn_target(d);
+                let target_dist = field[target];
+                if target_dist < cur_dist {
+                    2.5 // Hedefe yaklaşıyor (en kısa yol adımı)
+                } else if target_dist == cur_dist {
+                    0.0 // Yan adım / mesafe koruma
                 } else {
-                    -1.0
+                    -2.5 // Çıkmaz sokak veya geri adım (mesafeyi uzatıyor)
                 }
             }
             MoveKind::HWall(slot) | MoveKind::VWall(slot) => {
@@ -733,15 +870,6 @@ pub fn move_priors(pos: &Position, moves: &[Move]) -> Vec<f32> {
                 if theirs > 0.0 {
                     0.6 * (theirs - 1.4 * mine) - 0.4
                 } else {
-                    // Rakibi şu an yavaşlatmayan duvar. Eski sürümde bunlara
-                    // -3.0 veriliyordu, yani arama onlara pratikte hiç
-                    // bakmıyordu — ve **savunma duvarları tam olarak bu
-                    // gruptadır**: rakibin ileride yapacağı güçlü hamleyi
-                    // önceden bozan duvarın anlık kazancı sıfırdır.
-                    //
-                    // Artık düşük ama sıfır olmayan bir ağırlık alıyorlar,
-                    // böylece arama gerektiğinde onları da deneyebiliyor.
-                    // Kendi yolunu uzatanlar yine dibe iniyor.
                     -1.6 - 0.8 * mine
                 }
             }

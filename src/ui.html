@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Gedik — Quoridor motoru</title>
+<title>Quoridor motoru</title>
 <style>
   :root {
     --cell: 46px;
@@ -118,7 +118,7 @@
 <body>
 
 <div>
-  <h1>Gedik <span style="font-weight:400;color:var(--dim);font-size:14px">Quoridor motoru</span></h1>
+  <h1>Quoridor motoru</h1>
   <div class="sub">bitboard çekirdek + heuristic MCTS · yerel</div>
   <div class="boardwrap">
     <div class="ranks" id="ranks"></div>
@@ -229,20 +229,14 @@
 <script>
 const N = 9, WD = 8;
 let CORES = 1;
-// Süre bütçeli seçenekler tüm çekirdekleri kullanır (t=0 = makinedeki kadar).
 const ENGINES = [
-  // Varsayilan deger fonksiyonu artik ogrenilmis olan (+267 Elo, 181 oyun).
-  // Geriye kalan tek ayar butce, ve arama ~300 bin iterasyonda tavan yapiyor:
-  // 20 bin -> 200 bin +131 Elo, 200 bin -> 2 milyon sadece +19 (belirsiz).
-  // O yuzden "10 saniye" gibi bir secenek yok; olculebilir faydasi yok.
-  //
-  // Ablasyonlar (mctsu / mctsr / mctsf / w=0 / ab) listeden cikti ama
-  // kaybolmadi: "Motor gucu" tablosundaki satira tiklayinca o motor
-  // seciciye yukleniyor, ve `gedik match` hepsini hala kabul ediyor.
-  ["mcts:2500",       "Kolay — 2 500 iterasyon"],
-  ["mcts:20000",      "Orta — 20 000 iterasyon"],
-  ["mcts:60000",      "Zor — 60 000 iterasyon"],
-  ["mcts:300000:t=0", "En güçlü — 300 000 iterasyon"],
+  ["mcts:2500",        "Kolay — 2 500 iterasyon"],
+  ["mcts:20000",       "Orta — 20 000 iterasyon"],
+  ["mcts:60000",       "Zor — 60 000 iterasyon"],
+  ["mcts:300000:t=0",  "Güçlü — 300 000 iterasyon"],
+  ["mcts:1000ms:t=0",  "Usta — 1.0 saniye (Çok Çekirdek)"],
+  ["mcts:2000ms:t=0",  "Büyükusta — 2.0 saniye (Çok Çekirdek)"],
+  ["mcts:1000000:t=0", "Maksimum — 1 000 000 iterasyon"],
 ];
 
 // Sayfa URL'inde ?fen=... varsa oradan başla — pozisyon paylaşmayı ve
@@ -462,7 +456,11 @@ async function runEngines() {
     busy = true; render();
     try {
       const spec = engineFor(state.side);
-      const r = await get("/api/bot", { fen: state.fen, engine: spec });
+      const r = await get("/api/bot", {
+        fen: state.fen,
+        engine: spec,
+        history: history.slice(-16).join(","),
+      });
       lastMoveSlot = null;
       const m = state.moves.find(x => x.id === r.id);
       if (m && m.kind !== "p") lastMoveSlot = { kind: m.kind, slot: m.slot };
@@ -657,7 +655,11 @@ $("hint").onclick = async () => {
   if (busy || !state || state.winner !== null) return;
   busy = true; render();
   try {
-    const r = await get("/api/bot", { fen: state.fen, engine: engineFor(state.side) });
+    const r = await get("/api/bot", {
+      fen: state.fen,
+      engine: engineFor(state.side),
+      history: history.slice(-16).join(","),
+    });
     showBot(r);
   } catch (e) { showError(e); }
   busy = false; render();
@@ -685,7 +687,7 @@ async function loadRatings() {
   const wrap = $("elowrap");
   if (!r.engines || !r.engines.length) {
     wrap.innerHTML = 'Turnuva sonucu yok. Uretmek icin:<br>' +
-      '<code style="font-size:11px">gedik tournament 4 mcts:20000 ab:300ms</code>';
+      '<code style="font-size:11px">quoridor tournament 4 mcts:20000 ab:300ms</code>';
     return;
   }
   const elos = r.engines.map(e => e.elo);

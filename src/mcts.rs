@@ -10,8 +10,8 @@
 
 use crate::board::Position;
 use crate::heuristics::{
-    candidate_moves_filtered, move_priors, playout, value_with_opt, Rng, NUM_FEATURES,
-    VALUE_WEIGHTS,
+    candidate_moves_filtered, exact_race_winner, move_priors, playout, value_with_opt, Rng,
+    NUM_FEATURES, VALUE_WEIGHTS,
 };
 use crate::moves::Move;
 use std::time::{Duration, Instant};
@@ -94,6 +94,9 @@ pub struct Mcts {
     /// `ag.bin` varsa sinir ağıyla değerlendir. Dosya yoksa sessizce
     /// doğrusal değerlendirmeye düşüyor — motor her hâlükârda çalışıyor.
     pub use_nn: bool,
+    /// Bu arama icin ozel ag. `None` ise varsayilan `ag.bin` kullaniliyor.
+    /// Iki agi ayni surecte, birbirine karsi oynatabilmek icin var.
+    pub net: Option<&'static crate::nn::Net>,
     /// Seyrek indeks tamponu; her yaprakta yeniden ayırmamak için.
     nn_scratch: Vec<u16>,
     /// 0 = elle yazılmış hamle sıralaması, 1 = kökte ağın politikası,
@@ -106,6 +109,67 @@ pub struct Mcts {
     /// Kök prior'una karıştırılan gürültü oranı. Tek thread'de 0 (deterministik
     /// ve en güçlü); paralel aramada ağaçları farklılaştırmak için > 0.
     pub root_noise: f32,
+    /// Ağacın kökünün Zobrist hash'i (ağaç yeniden kullanımını güvenle doğrulamak için).
+    pub root_hash: u64,
+    /// MCTS Transposition Table: aynı pozisyona varan dallar için değer ve kanıt önbelleği.
+    pub tt: MctsTt,
+    /// Oyun geçmişindeki son pozisyonların hash'leri (mekik / sonsuz tekrarı önlemek için).
+    pub history: Vec<u64>,
+    /// Gumbel AlphaZero araması açık mı (Sequential Halving).
+    pub use_gumbel: bool,
+    /// Sıfır Hata Kalkanı (BlunderGuard) açık mı.
+    pub use_guard: bool,
+    /// Kesin Son Oyun Minimax Çözücüsü (EndgameSolver) açık mı.
+    pub use_endgame_solver: bool,
+}
+
+#[derive(Clone, Copy)]
+pub struct MctsTtEntry {
+    pub hash: u64,
+    pub value: f32,
+    pub proof: i8,
+}
+
+pub struct MctsTt {
+    entries: Vec<Option<MctsTtEntry>>,
+    mask: usize,
+}
+
+impl MctsTt {
+    pub fn new(bits: usize) -> Self {
+        let size = 1usize << bits;
+        MctsTt {
+            entries: vec![None; size],
+            mask: size - 1,
+        }
+    }
+
+    #[inline(always)]
+    pub fn get(&self, hash: u64) -> Option<MctsTtEntry> {
+        let idx = (hash as usize) & self.mask;
+        match self.entries[idx] {
+            Some(e) if e.hash == hash => Some(e),
+            _ => None,
+        }
+    }
+
+    #[inline(always)]
+    pub fn insert(&mut self, hash: u64, value: f32, proof: i8) {
+        let idx = (hash as usize) & self.mask;
+        self.entries[idx] = Some(MctsTtEntry { hash, value, proof });
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.fill(None);
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.iter().filter(|e| e.is_some()).count()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 /// Sayisal olarak guvenli softmax: en buyugu cikarmadan exp tasabiliyor.
@@ -126,6 +190,14 @@ fn softmax(logits: &[f32], t: f32) -> Vec<f32> {
 }
 
 impl Mcts {
+    /// Bu aramanin kullanacagi ag: once `ag=` ile verilen, yoksa varsayilan.
+    fn ag(&self) -> Option<&'static crate::nn::Net> {
+        match self.net {
+            Some(n) => Some(n),
+            None => crate::nn::net(),
+        }
+    }
+
     pub fn new(seed: u64) -> Mcts {
         Mcts {
             nodes: Vec::with_capacity(1 << 16),
@@ -145,13 +217,18 @@ impl Mcts {
             max_children: usize::MAX,
             soft_value: true,
             use_nn: true,
+            net: None,
             nn_scratch: Vec::with_capacity(32),
-            // Varsayilan 0 = elle yazilmis siralama. Agin politikasi
-            // olculmeden varsayilan olmuyor; `pol=1` ile aciliyor.
             policy_mode: 0,
             policy_temp: 1.0,
             weights: VALUE_WEIGHTS,
             root_noise: 0.0,
+            root_hash: 0,
+            tt: MctsTt::new(18),
+            history: Vec::new(),
+            use_gumbel: false,
+            use_guard: true,
+            use_endgame_solver: true,
         }
     }
 
@@ -159,12 +236,87 @@ impl Mcts {
         self.rng = Rng::new(seed);
     }
 
+    /// Ağacı temizler ve sıfırlar.
+    pub fn reset(&mut self) {
+        self.nodes.clear();
+        self.root_hash = 0;
+        self.tt.clear();
+    }
+
+    /// Oynanan hamlenin alt ağacını yeni kök yaparak ağacı korur ve taşır (subtree reuse).
+    ///
+    /// Bu işlem, önceki aramanın analiz ettiği binlerce düğümü bir sonraki hamleye
+    /// aktarır. Hamle ağaçta bulunamazsa veya pozisyon uyuşmazsa ağaç sıfırlanır.
+    pub fn advance_tree(&mut self, pos: &Position, mv: Move) -> bool {
+        if self.nodes.is_empty() || self.root_hash != pos.hash {
+            self.nodes.clear();
+            self.root_hash = 0;
+            return false;
+        }
+        let root = self.nodes[0];
+        if root.n_children == 0 || root.first_child == 0 {
+            self.nodes.clear();
+            self.root_hash = 0;
+            return false;
+        }
+        let first = root.first_child as usize;
+        let count = root.n_children as usize;
+        let mut target_idx = None;
+        for i in 0..count {
+            if self.nodes[first + i].mv == mv {
+                target_idx = Some(first + i);
+                break;
+            }
+        }
+        let Some(child_idx) = target_idx else {
+            self.nodes.clear();
+            self.root_hash = 0;
+            return false;
+        };
+
+        // Subtree compaction (BFS ile alt ağacı yeni vektöre kopyala)
+        let mut new_nodes = Vec::with_capacity(1024);
+        let mut queue = std::collections::VecDeque::new();
+
+        let mut new_root = self.nodes[child_idx];
+        new_root.mv = Move(0);
+        new_root.prior = 1.0;
+        new_nodes.push(new_root);
+        queue.push_back((child_idx, 0usize));
+
+        while let Some((old_i, new_i)) = queue.pop_front() {
+            let old_node = self.nodes[old_i];
+            if old_node.n_children > 0 && old_node.first_child > 0 {
+                let first_old = old_node.first_child as usize;
+                let n_ch = old_node.n_children as usize;
+                let first_new = new_nodes.len() as u32;
+                new_nodes[new_i].first_child = first_new;
+
+                for k in 0..n_ch {
+                    let old_c_idx = first_old + k;
+                    if old_c_idx < self.nodes.len() {
+                        let child_node = self.nodes[old_c_idx];
+                        let new_c_idx = new_nodes.len();
+                        new_nodes.push(child_node);
+                        if child_node.n_children > 0 {
+                            queue.push_back((old_c_idx, new_c_idx));
+                        }
+                    }
+                }
+            } else {
+                new_nodes[new_i].first_child = 0;
+                new_nodes[new_i].n_children = 0;
+            }
+        }
+        self.nodes = new_nodes;
+        let mut next_pos = *pos;
+        next_pos.make(mv);
+        self.root_hash = next_pos.hash;
+        true
+    }
+
     /// Sabit rollout bütçesiyle arama.
-    pub fn search_rollouts(
-        &mut self,
-        pos: &Position,
-        rollouts: u32,
-    ) -> (Option<Move>, SearchStats) {
+    pub fn search_rollouts(&mut self, pos: &Position, rollouts: u32) -> (Option<Move>, SearchStats) {
         self.run(pos, rollouts, None)
     }
 
@@ -179,19 +331,28 @@ impl Mcts {
         max_rollouts: u32,
         budget: Option<Duration>,
     ) -> (Option<Move>, SearchStats) {
+        if self.use_gumbel {
+            return self.search_gumbel(pos, max_rollouts, budget);
+        }
+
         let start = Instant::now();
-        self.nodes.clear();
-        self.nodes.push(Node {
-            mv: Move(0),
-            first_child: 0,
-            n_children: 0,
-            side: pos.side,
-            terminal: pos.winner().is_some(),
-            visits: 0,
-            value: 0.0,
-            prior: 1.0,
-            proof: 0,
-        });
+        let reuse = !self.nodes.is_empty() && self.root_hash == pos.hash;
+
+        if !reuse {
+            self.nodes.clear();
+            self.root_hash = pos.hash;
+            self.nodes.push(Node {
+                mv: Move(0),
+                first_child: 0,
+                n_children: 0,
+                side: pos.side,
+                terminal: pos.winner().is_some(),
+                visits: 0,
+                value: 0.0,
+                prior: 1.0,
+                proof: 0,
+            });
+        }
 
         let mut done = 0u32;
         while done < max_rollouts {
@@ -223,7 +384,27 @@ impl Mcts {
             })
             .collect();
         // En çok ziyaret edilen; eşitlikte kazanma oranı.
-        top.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.total_cmp(&a.2)));
+        // Mekik / 3-tekrar cezası: geçmişte görülmüş pozisyonlara dönen hamlelerin ziyaret önceliğini düşür.
+        if !self.history.is_empty() {
+            top.sort_by(|a, b| {
+                let mut nxt_a = *pos;
+                nxt_a.make(a.0);
+                let rep_a = self.history.iter().filter(|&&h| h == nxt_a.hash).count();
+                let score_a = a.1 as f32 * (1.0 - (rep_a as f32 * 0.35)).max(0.001);
+
+                let mut nxt_b = *pos;
+                nxt_b.make(b.0);
+                let rep_b = self.history.iter().filter(|&&h| h == nxt_b.hash).count();
+                let score_b = b.1 as f32 * (1.0 - (rep_b as f32 * 0.35)).max(0.001);
+
+                score_b
+                    .total_cmp(&score_a)
+                    .then(b.1.cmp(&a.1))
+                    .then(b.2.total_cmp(&a.2))
+            });
+        } else {
+            top.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.total_cmp(&a.2)));
+        }
 
         // Kanıtlanmış kazanan hamle varsa istatistiğe bakma, onu oyna.
         let proven = if self.use_solver {
@@ -235,13 +416,6 @@ impl Mcts {
             None
         };
 
-        // Kaybedilmiş pozisyonda ziyaret sayısına bakmak anlamsız: bütün
-        // hamleler 0'a yakın değer alır, aralarındaki fark gürültüdür ve motor
-        // iki kare arasında mekik dokumaya başlar. Gerçek bir oyunda bu hem
-        // rakibe hata yapma şansı bırakmaz hem de berbat görünür.
-        //
-        // Böyle durumlarda prior'a düşüyoruz: prior en kısa yol hamlelerini
-        // öne aldığı için motor hiç değilse hedefe doğru yürümeye devam ediyor.
         let hopeless = top.first().map(|t| t.2).unwrap_or(0.0) < LOST_THRESHOLD;
         let fallback = if hopeless {
             (0..root.n_children as u32)
@@ -258,9 +432,18 @@ impl Mcts {
             None
         };
 
-        let best = proven.or(fallback).or_else(|| top.first().map(|t| t.0));
+        let guarded_best = if self.use_guard {
+            crate::guard::filter_root_moves(pos, &top)
+        } else {
+            None
+        };
+
+        let best = proven
+            .or(guarded_best)
+            .or(fallback)
+            .or_else(|| top.first().map(|t| t.0));
         let win_rate = top.first().map(|t| t.2).unwrap_or(0.0);
-        top.truncate(24); // 6 gösterim için yeterliydi; politika hedefi için daha fazlası lazım
+        top.truncate(24);
 
         let stats = SearchStats {
             rollouts: done,
@@ -270,6 +453,235 @@ impl Mcts {
             top,
         };
         (best, stats)
+    }
+
+    /// Gumbel AlphaZero: Sequential Halving tabanlı matematiksel sıfır kör noktalı arama.
+    pub fn search_gumbel(
+        &mut self,
+        pos: &Position,
+        max_rollouts: u32,
+        budget: Option<Duration>,
+    ) -> (Option<Move>, SearchStats) {
+        let start = Instant::now();
+        self.nodes.clear();
+        self.root_hash = pos.hash;
+        self.nodes.push(Node {
+            mv: Move(0),
+            first_child: 0,
+            n_children: 0,
+            side: pos.side,
+            terminal: pos.winner().is_some(),
+            visits: 0,
+            value: 0.0,
+            prior: 1.0,
+            proof: 0,
+        });
+
+        // Kök düğümü genişlet
+        self.iterate(pos);
+        let root = self.nodes[0];
+        if root.n_children <= 1 {
+            let mv = if root.n_children == 1 {
+                Some(self.nodes[root.first_child as usize].mv)
+            } else {
+                None
+            };
+            return (
+                mv,
+                SearchStats {
+                    rollouts: 1,
+                    nodes: self.nodes.len(),
+                    win_rate: 0.5,
+                    elapsed_s: start.elapsed().as_secs_f64(),
+                    top: Vec::new(),
+                },
+            );
+        }
+
+        let n_c = root.n_children as usize;
+        let gumbel: Vec<f32> = (0..n_c)
+            .map(|_| {
+                let u = self.rng.unit().clamp(1e-6, 1.0 - 1e-6);
+                -(-u.ln()).ln()
+            })
+            .collect();
+
+        // En iyi m adayı seç (Gumbel Top-k)
+        let m = n_c.min(16);
+        let mut candidates: Vec<usize> = (0..n_c).collect();
+        candidates.sort_by(|&a, &b| {
+            let na = self.nodes[(root.first_child as usize) + a];
+            let nb = self.nodes[(root.first_child as usize) + b];
+            let za = na.prior.max(1e-6).ln() + gumbel[a];
+            let zb = nb.prior.max(1e-6).ln() + gumbel[b];
+            zb.total_cmp(&za)
+        });
+        candidates.truncate(m);
+
+        let phases = if m > 8 { 4 } else if m > 4 { 3 } else if m > 2 { 2 } else { 1 };
+        let mut done = 1u32;
+
+        for phase in 0..phases {
+            if candidates.len() <= 1 {
+                break;
+            }
+            let phase_budget = (max_rollouts / (candidates.len() as u32 * phases as u32)).max(1);
+
+            for &cand_idx in &candidates {
+                let child_node_idx = (root.first_child as usize) + cand_idx;
+                for _ in 0..phase_budget {
+                    if let Some(b) = budget {
+                        if done % 128 == 0 && start.elapsed() >= b {
+                            break;
+                        }
+                    }
+                    self.iterate_forced(pos, child_node_idx);
+                    done += 1;
+                }
+            }
+
+            // Gumbel Puanı: l_a + g_a + sigma(q_a)
+            let max_visits = candidates
+                .iter()
+                .map(|&c| self.nodes[(root.first_child as usize) + c].visits)
+                .max()
+                .unwrap_or(1);
+
+            candidates.sort_by(|&a, &b| {
+                let na = self.nodes[(root.first_child as usize) + a];
+                let nb = self.nodes[(root.first_child as usize) + b];
+                let qa = if na.visits > 0 { na.value / na.visits as f32 } else { 0.5 };
+                let qb = if nb.visits > 0 { nb.value / nb.visits as f32 } else { 0.5 };
+                let c_visit = 50.0f32;
+                let c_scale = 1.0f32;
+                let sigma_a = (c_visit + max_visits as f32) * c_scale * (qa - 0.5);
+                let sigma_b = (c_visit + max_visits as f32) * c_scale * (qb - 0.5);
+                let score_a = na.prior.max(1e-6).ln() + gumbel[a] + sigma_a;
+                let score_b = nb.prior.max(1e-6).ln() + gumbel[b] + sigma_b;
+                score_b.total_cmp(&score_a)
+            });
+
+            // Sequential Halving: adayların yarısını ele
+            if phase < phases - 1 {
+                let next_len = ((candidates.len() + 1) / 2).max(1);
+                candidates.truncate(next_len);
+            }
+        }
+
+        let best_cand = candidates[0];
+        let best_node = self.nodes[(root.first_child as usize) + best_cand];
+
+        let mut top: Vec<(Move, u32, f32)> = (0..root.n_children as usize)
+            .map(|i| {
+                let n = self.nodes[(root.first_child as usize) + i];
+                let wr = if n.visits > 0 { n.value / n.visits as f32 } else { 0.0 };
+                (n.mv, n.visits, wr)
+            })
+            .collect();
+        top.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.total_cmp(&a.2)));
+
+        let best_mv = if self.use_guard {
+            crate::guard::filter_root_moves(pos, &top).or(Some(best_node.mv))
+        } else {
+            Some(best_node.mv)
+        };
+        let win_rate = if best_node.visits > 0 {
+            best_node.value / best_node.visits as f32
+        } else {
+            0.5
+        };
+        top.truncate(24);
+
+        let stats = SearchStats {
+            rollouts: done,
+            nodes: self.nodes.len(),
+            win_rate,
+            elapsed_s: start.elapsed().as_secs_f64(),
+            top,
+        };
+        (best_mv, stats)
+    }
+
+    fn iterate_forced(&mut self, root_pos: &Position, child_idx: usize) {
+        let mut pos = *root_pos;
+        self.path.clear();
+        self.path.push(0);
+        self.path.push(child_idx as u32);
+        let mv = self.nodes[child_idx].mv;
+        pos.make(mv);
+
+        let mut idx = child_idx;
+        loop {
+            if self.nodes[idx].terminal {
+                break;
+            }
+            if self.nodes[idx].n_children == 0 {
+                if self.nodes[idx].visits < self.expand_threshold {
+                    break;
+                }
+                if self.nodes.len() >= self.max_nodes {
+                    break;
+                }
+                let moves = candidate_moves_filtered(&pos, self.filter_walls);
+                if moves.is_empty() {
+                    self.nodes[idx].terminal = true;
+                    break;
+                }
+                let priors = if self.use_priors {
+                    let ag_politika = self.policy_mode > 0 && self.ag().is_some_and(|n| n.has_policy());
+                    let ham = if ag_politika {
+                        self.ag().and_then(|n| n.policy(&pos, &moves, &mut self.nn_scratch))
+                    } else {
+                        None
+                    };
+                    match ham {
+                        Some(logits) => softmax(&logits, self.policy_temp),
+                        None => move_priors(&pos, &moves),
+                    }
+                } else {
+                    vec![1.0 / moves.len() as f32; moves.len()]
+                };
+
+                let mut moves = moves;
+                if moves.len() > self.max_children {
+                    let mut idx_arr: Vec<usize> = (0..moves.len()).collect();
+                    idx_arr.sort_by(|&a, &b| {
+                        let pa = (!moves[a].is_wall(), priors[a]);
+                        let pb = (!moves[b].is_wall(), priors[b]);
+                        pb.0.cmp(&pa.0).then_with(|| pb.1.total_cmp(&pa.1))
+                    });
+                    moves = idx_arr.into_iter().take(self.max_children).map(|i| moves[i]).collect();
+                }
+
+                let first_child = self.nodes.len() as u32;
+                let n_children = moves.len() as u16;
+                let side = pos.side;
+                for (m, pr) in moves.into_iter().zip(priors) {
+                    self.nodes.push(Node {
+                        mv: m,
+                        first_child: 0,
+                        n_children: 0,
+                        side,
+                        terminal: false,
+                        visits: 0,
+                        value: 0.0,
+                        prior: pr,
+                        proof: 0,
+                    });
+                }
+                self.nodes[idx].first_child = first_child;
+                self.nodes[idx].n_children = n_children;
+                break;
+            }
+
+            let best_child = self.select_child(idx);
+            self.path.push(best_child as u32);
+            let mv = self.nodes[best_child].mv;
+            pos.make(mv);
+            idx = best_child;
+        }
+
+        self.eval_and_backprop(&pos, idx);
     }
 
     fn iterate(&mut self, root_pos: &Position) {
@@ -296,20 +708,12 @@ impl Mcts {
                     break;
                 }
                 let mut priors = if self.use_priors {
-                    // Ağın politika başı: hangi hamlelere bakmaya değer.
-                    //
-                    // `policy_mode` 0 = elle yazılmış sıralama (eski davranış),
-                    // 1 = yalnızca kökte ağ, 2 = her düğümde ağ.
-                    //
-                    // Kök-yalnız seçeneği ucuz ve gözlenen hatayı doğrudan
-                    // hedefliyor: kazandıran hamleye motorun hiç bakmaması.
-                    // Her düğümde çağırmak arama hızını düşürüyor, o yüzden
-                    // ikisi de ölçülebilir dursun.
                     let ag_politika = self.policy_mode > 0
                         && (self.policy_mode > 1 || idx == 0)
-                        && crate::nn::net().is_some_and(|n| n.has_policy());
+                        && self.ag().is_some_and(|n| n.has_policy());
                     let ham = if ag_politika {
-                        crate::nn::net().and_then(|n| n.policy(&pos, &moves, &mut self.nn_scratch))
+                        self.ag()
+                            .and_then(|n| n.policy(&pos, &moves, &mut self.nn_scratch))
                     } else {
                         None
                     };
@@ -321,8 +725,6 @@ impl Mcts {
                     vec![1.0 / moves.len() as f32; moves.len()]
                 };
                 if idx == 0 && self.root_noise > 0.0 {
-                    // AlphaZero'daki kök Dirichlet gürültüsünün ucuz karşılığı:
-                    // üstel örneklerin normalize edilmiş hali (Dirichlet(1,..,1)).
                     let eps = self.root_noise;
                     let mut noise: Vec<f32> = (0..priors.len())
                         .map(|_| -(self.rng.unit().max(1e-6)).ln())
@@ -337,22 +739,18 @@ impl Mcts {
                         }
                     }
                 }
-                // Prior'a göre en iyi K aday. Quoridor'da aday sayısı 40-60;
-                // hepsini açmak ağacı derinleşmeden genişletiyor ve düğüm
-                // tavanına erken çarpıyor. Piyon hamleleri her zaman kalıyor:
-                // yarışı kaybetmemek onlara bağlı.
                 let mut moves = moves;
                 if moves.len() > self.max_children {
-                    let mut idx: Vec<usize> = (0..moves.len()).collect();
-                    idx.sort_by(|&a, &b| {
+                    let mut idx_arr: Vec<usize> = (0..moves.len()).collect();
+                    idx_arr.sort_by(|&a, &b| {
                         let pa = (!moves[a].is_wall(), priors[a]);
                         let pb = (!moves[b].is_wall(), priors[b]);
                         pb.0.cmp(&pa.0).then(pb.1.total_cmp(&pa.1))
                     });
-                    idx.truncate(self.max_children);
-                    idx.sort_unstable();
-                    moves = idx.iter().map(|&i| moves[i]).collect();
-                    priors = idx.iter().map(|&i| priors[i]).collect();
+                    idx_arr.truncate(self.max_children);
+                    idx_arr.sort_unstable();
+                    moves = idx_arr.iter().map(|&i| moves[i]).collect();
+                    priors = idx_arr.iter().map(|&i| priors[i]).collect();
                     let sum: f32 = priors.iter().sum();
                     if sum > 0.0 {
                         for p in priors.iter_mut() {
@@ -394,32 +792,50 @@ impl Mcts {
             }
         }
 
-        // v_leaf: yapraktaki *sıradaki* oyuncunun kazanma olasılığı.
+        self.eval_and_backprop(&pos, idx);
+    }
+
+    fn eval_and_backprop(&mut self, pos: &Position, leaf_idx: usize) {
         let leaf_side = pos.side as usize;
         let v_leaf = match pos.winner() {
             Some(w) => f32::from(w == leaf_side),
-            None => match self.leaf {
-                Leaf::Rollout => {
-                    let w = playout(pos, &mut self.rng, self.wall_prob, self.max_ply);
-                    f32::from(w == leaf_side)
-                }
-                Leaf::Value => {
-                    if self.use_nn {
-                        match crate::nn::net() {
-                            Some(n) => n.value(&pos, &mut self.nn_scratch),
-                            None => value_with_opt(&pos, &self.weights, self.soft_value),
-                        }
-                    } else {
-                        value_with_opt(&pos, &self.weights, self.soft_value)
+            None => {
+                if let Some(cached) = self.tt.get(pos.hash) {
+                    if cached.proof != 0 && self.nodes[leaf_idx].proof == 0 {
+                        self.nodes[leaf_idx].proof = cached.proof;
                     }
+                    cached.value
+                } else if pos.walls[0] == 0 && pos.walls[1] == 0 {
+                    let w = exact_race_winner(pos);
+                    let val = f32::from(w == leaf_side);
+                    self.tt.insert(pos.hash, val, 0);
+                    val
+                } else {
+                    let val = match self.leaf {
+                        Leaf::Rollout => {
+                            let w = playout(*pos, &mut self.rng, self.wall_prob, self.max_ply);
+                            f32::from(w == leaf_side)
+                        }
+                        Leaf::Value => {
+                            if self.use_nn {
+                                match self.ag() {
+                                    Some(n) => n.value(pos, &mut self.nn_scratch),
+                                    None => value_with_opt(pos, &self.weights, self.soft_value),
+                                }
+                            } else {
+                                value_with_opt(pos, &self.weights, self.soft_value)
+                            }
+                        }
+                    };
+                    self.tt.insert(pos.hash, val, self.nodes[leaf_idx].proof);
+                    val
                 }
-            },
+            }
         };
 
         for &n in &self.path {
             let node = &mut self.nodes[n as usize];
             node.visits += 1;
-            // value, bu düğüme gelen hamleyi oynayan oyuncunun açısından.
             let mover = (1 - node.side) as usize;
             node.value += if mover == leaf_side {
                 v_leaf
@@ -468,7 +884,8 @@ impl Mcts {
                 break;
             }
             let first = p.first_child as usize;
-            let all_lost = (0..p.n_children as usize).all(|i| self.nodes[first + i].proof == 1);
+            let all_lost = (0..p.n_children as usize)
+                .all(|i| self.nodes[first + i].proof == 1);
             if all_lost {
                 self.nodes[parent].proof = -1;
             } else {
@@ -570,6 +987,7 @@ pub struct Config {
     pub max_children: usize,
     pub soft_value: bool,
     pub use_nn: bool,
+    pub net: Option<&'static crate::nn::Net>,
     pub policy_mode: u8,
     pub policy_temp: f32,
     pub weights: [f32; NUM_FEATURES],
@@ -579,6 +997,9 @@ pub struct Config {
     pub leaf: Leaf,
     pub wall_prob: f32,
     pub root_noise: f32,
+    pub use_gumbel: bool,
+    pub use_guard: bool,
+    pub use_endgame_solver: bool,
 }
 
 impl Default for Config {
@@ -593,6 +1014,7 @@ impl Default for Config {
             max_children: m.max_children,
             soft_value: m.soft_value,
             use_nn: m.use_nn,
+            net: m.net,
             policy_mode: m.policy_mode,
             policy_temp: m.policy_temp,
             weights: m.weights,
@@ -602,6 +1024,9 @@ impl Default for Config {
             leaf: m.leaf,
             wall_prob: m.wall_prob,
             root_noise: m.root_noise,
+            use_gumbel: m.use_gumbel,
+            use_guard: m.use_guard,
+            use_endgame_solver: m.use_endgame_solver,
         }
     }
 }
@@ -616,6 +1041,7 @@ impl Config {
         m.max_children = self.max_children;
         m.soft_value = self.soft_value;
         m.use_nn = self.use_nn;
+        m.net = self.net;
         m.policy_mode = self.policy_mode;
         m.policy_temp = self.policy_temp;
         m.weights = self.weights;
@@ -625,6 +1051,9 @@ impl Config {
         m.leaf = self.leaf;
         m.wall_prob = self.wall_prob;
         m.root_noise = self.root_noise;
+        m.use_gumbel = self.use_gumbel;
+        m.use_guard = self.use_guard;
+        m.use_endgame_solver = self.use_endgame_solver;
     }
 }
 
@@ -729,7 +1158,9 @@ pub fn search_parallel(
 
     let mut top: Vec<(Move, u32, f32)> = agg
         .iter()
-        .map(|(&id, &(v, val, _))| (Move(id), v, if v > 0 { val / v as f32 } else { 0.0 }))
+        .map(|(&id, &(v, val, _))| {
+            (Move(id), v, if v > 0 { val / v as f32 } else { 0.0 })
+        })
         .collect();
     top.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.total_cmp(&a.2)));
 

@@ -1,6 +1,6 @@
-use gedik::board::Position;
-use gedik::engine::Engine;
+﻿use gedik::board::Position;
 use gedik::heuristics::{candidate_moves, playout, Rng};
+use gedik::engine::Engine;
 use gedik::mcts::Mcts;
 use gedik::notation::{board_string, move_name, parse_move};
 use gedik::perft::{divide, perft};
@@ -422,12 +422,7 @@ fn cmd_tournament(args: &[String]) {
     // dagitiyoruz. Ciftler cok farkli hizlarda kosuyor (2M iterasyonluk bir
     // motor 20 binlikten 100 kat yavas), o yuzden cift basina degil oyun
     // basina dagitmak lazim; yoksa bir yavas cift butun makineyi bekletir.
-    struct Gorev {
-        i: usize,
-        j: usize,
-        g: usize,
-        a_first: bool,
-    }
+    struct Gorev { i: usize, j: usize, g: usize, a_first: bool }
     let mut gorevler: Vec<Gorev> = Vec::new();
     for i in 0..n {
         for j in (i + 1)..n {
@@ -442,9 +437,8 @@ fn cmd_tournament(args: &[String]) {
 
     let sira = std::sync::atomic::AtomicUsize::new(0);
     let biten = std::sync::atomic::AtomicUsize::new(0);
-    let sonuclar: Vec<std::sync::Mutex<Vec<(usize, usize, f64)>>> = (0..threads)
-        .map(|_| std::sync::Mutex::new(Vec::new()))
-        .collect();
+    let sonuclar: Vec<std::sync::Mutex<Vec<(usize, usize, f64)>>> =
+        (0..threads).map(|_| std::sync::Mutex::new(Vec::new())).collect();
 
     std::thread::scope(|scope| {
         for tid in 0..threads {
@@ -453,7 +447,10 @@ fn cmd_tournament(args: &[String]) {
             scope.spawn(move || loop {
                 let k = sira.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let Some(gv) = gorevler.get(k) else { break };
-                let start = random_opening(1000 + gv.g as u64 * 17 + (gv.i * 31 + gv.j) as u64, 4);
+                let start = random_opening(
+                    1000 + gv.g as u64 * 17 + (gv.i * 31 + gv.j) as u64,
+                    4,
+                );
                 let mut ea = Engine::parse(&specs[gv.i], 7 + gv.g as u64 * 13 + gv.i as u64);
                 let mut eb = Engine::parse(&specs[gv.j], 11 + gv.g as u64 * 19 + gv.j as u64);
                 // i'nin bu oyundan aldigi puan: 1 kazanma, 0.5 bitmedi, 0 kayip
@@ -496,18 +493,10 @@ fn cmd_tournament(args: &[String]) {
         score[j] += games - si;
         played[i] += games;
         played[j] += games;
-        pairings.push(gedik::rating::Pairing {
-            a: i,
-            b: j,
-            a_score: si,
-            games,
-        });
+        pairings.push(gedik::rating::Pairing { a: i, b: j, a_score: si, games });
         println!(
             "  {:<30} vs {:<30}  {:>4.1} - {:<4.1}",
-            specs[i],
-            specs[j],
-            si,
-            games - si
+            specs[i], specs[j], si, games - si
         );
     }
 
@@ -515,10 +504,7 @@ fn cmd_tournament(args: &[String]) {
     let mut order: Vec<usize> = (0..n).collect();
     order.sort_by(|&a, &b| elo[b].total_cmp(&elo[a]));
 
-    println!(
-        "\n{:<4}{:<24}{:>8}{:>8}{:>10}{:>9}",
-        "#", "motor", "Elo", "+/-", "skor", "mac"
-    );
+    println!("\n{:<4}{:<24}{:>8}{:>8}{:>10}{:>9}", "#", "motor", "Elo", "+/-", "skor", "mac");
     for (rank, &i) in order.iter().enumerate() {
         let err = gedik::rating::elo_stderr(score[i], played[i]);
         println!(
@@ -559,3 +545,4 @@ fn cmd_tournament(args: &[String]) {
         println!("ratings.json yazildi");
     }
 }
+

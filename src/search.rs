@@ -88,12 +88,7 @@ impl Searcher {
 
     /// Iterative deepening. `time_ms` dolduğunda son tamamlanan derinliğin
     /// sonucunu döndürür.
-    pub fn best_move(
-        &mut self,
-        pos: &Position,
-        max_depth: u32,
-        time_ms: u64,
-    ) -> (Option<Move>, i32) {
+    pub fn best_move(&mut self, pos: &Position, max_depth: u32, time_ms: u64) -> (Option<Move>, i32) {
         self.nodes = 0;
         self.stopped = false;
         self.deadline = Some(Instant::now() + Duration::from_millis(time_ms));

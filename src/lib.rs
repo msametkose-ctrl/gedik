@@ -1,4 +1,4 @@
-//! # gedik — Quoridor motoru
+//! # quoridor
 //!
 //! Hızlı bitboard tabanlı Quoridor kural çekirdeği.
 //!
@@ -16,7 +16,9 @@
 
 pub mod bitboard;
 pub mod board;
+pub mod endgame;
 pub mod engine;
+pub mod guard;
 pub mod heuristics;
 pub mod mcts;
 pub mod moves;

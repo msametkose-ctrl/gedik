@@ -1,4 +1,4 @@
-//! Savunma analizi: her hamlemizden sonra rakip **tek duvarla** yolumuzu en
+﻿//! Savunma analizi: her hamlemizden sonra rakip **tek duvarla** yolumuzu en
 //! fazla ne kadar uzatabiliyor?
 //!
 //! Yarışta öndeyken asıl soru "şu an yolum kaç" değil, "rakip bir hamlede
@@ -26,11 +26,7 @@ fn worst_case(p: &Position, me: usize) -> (u32, String) {
             if !p.wall_legal(slot, horizontal) {
                 continue;
             }
-            let mv = if horizontal {
-                Move::hwall(slot)
-            } else {
-                Move::vwall(slot)
-            };
+            let mv = if horizontal { Move::hwall(slot) } else { Move::vwall(slot) };
             let mut q = *p;
             if q.side as usize != opp {
                 continue;
@@ -57,18 +53,9 @@ fn main() {
         pos.make(parse_move(&pos, t.trim()).expect(t));
     }
     let me = pos.side as usize;
-    println!(
-        "sira {me}  yol {} / {}  duvar {:?}",
-        dist(&pos, 0),
-        dist(&pos, 1),
-        pos.walls
-    );
+    println!("sira {me}  yol {} / {}  duvar {:?}", dist(&pos, 0), dist(&pos, 1), pos.walls);
     let (w0, a0) = worst_case(&pos, me);
-    println!(
-        "hamle yapmadan once: yolum {}, rakip tek duvarla {} yapabilir ({a0})\n",
-        dist(&pos, me),
-        w0
-    );
+    println!("hamle yapmadan once: yolum {}, rakip tek duvarla {} yapabilir ({a0})\n", dist(&pos, me), w0);
 
     let mut rows: Vec<(u32, u32, u32, String, String)> = Vec::new();
     for mv in candidate_moves_filtered(&pos, true) {
@@ -80,11 +67,9 @@ fn main() {
     }
     // En kotu durumu en dusuk olan once; esitlikte kendi yolu kisa olan.
     rows.sort_by(|x, y| x.0.cmp(&y.0).then(x.1.cmp(&y.1)));
-    println!(
-        "{:>6} {:>8} {:>8} {:>10}  {}",
-        "hamle", "yolum", "rakip", "EN KOTU", "rakibin en iyi duvari"
-    );
+    println!("{:>6} {:>8} {:>8} {:>10}  {}", "hamle", "yolum", "rakip", "EN KOTU", "rakibin en iyi duvari");
     for (w, d, od, nm, ad) in rows.iter().take(14) {
         println!("{nm:>6} {d:>8} {od:>8} {w:>10}  {ad}");
     }
 }
+

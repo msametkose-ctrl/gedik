@@ -1,8 +1,5 @@
 # Gedik
 
-[![CI](https://github.com/msametkose-ctrl/gedik/actions/workflows/ci.yml/badge.svg)](https://github.com/msametkose-ctrl/gedik/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-
 A Quoridor engine written in Rust. Bitboard rules core, PUCT tree search,
 and a small learned evaluation network. No dependencies — `cargo build`
 works offline.
@@ -215,26 +212,6 @@ decided.
 Code comments are in Turkish. They explain *why*, including the mistakes —
 several comments exist specifically to record a wrong turn so it is not
 repeated.
-
-## Contributing
-
-Pull requests welcome. There is one rule, and it is the reason this engine
-works: **a change to playing strength is accepted on match results, not on
-argument.**
-
-```sh
-./target/release/gedik match "mcts:200000:<your change>" "mcts:200000" 12 42 6
-```
-
-Every time this project skipped that step it was wrong — including three
-times in a row on the same change, which cost it 267 Elo until someone
-finally played the games. [CONTRIBUTING.md](CONTRIBUTING.md) has the details
-and a list of what actually needs doing.
-
-The largest open problem: **move ordering is still hand-written and has
-never been trained.** The network format, the search hooks (`pol=`, `pt=`)
-and the training data are all in place; the first attempt measured worse
-than the hand-written version and nobody knows why yet.
 
 ## Credits
 

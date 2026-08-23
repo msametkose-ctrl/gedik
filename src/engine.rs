@@ -74,6 +74,7 @@ impl Engine {
                 };
                 cfg.filter_walls = kind != "mctsf";
                 cfg.use_priors = kind != "mctsu";
+                cfg.use_gumbel = kind == "gumbel" || kind == "mctsg";
                 if kind == "mctsh" {
                     cfg.weights = crate::heuristics::WEIGHTS_HAND;
                 }
@@ -87,19 +88,26 @@ impl Engine {
                         cfg.c_uct = v;
                     } else {
                         for kv in spec.split(',') {
-                            let Some((k, v)) = kv.split_once('=') else {
+                            let Some((k, v)) = kv.split_once('=') else { continue };
+                            // `ag=` degeri bir dosya yolu, sayi degil; sayiya
+                            // cevirme denemesinden ONCE ele alinmali yoksa
+                            // sessizce atlanir. Iki agi ayni maca sokan anahtar
+                            // bu: `mcts:200000:ag=tur2\ag64.bin`.
+                            if matches!(k.trim(), "ag" | "net") {
+                                cfg.net = crate::nn::net_from(v.trim());
+                                cfg.use_nn = cfg.net.is_some();
                                 continue;
-                            };
+                            }
                             let Ok(x) = v.parse::<f32>() else { continue };
                             match k.trim() {
                                 "cp" | "cpuct" => cfg.c_puct = x,
                                 "cu" | "cuct" => cfg.c_uct = x,
+                                "gb" | "gumbel" => cfg.use_gumbel = x != 0.0,
                                 "fpu" => cfg.fpu_reduction = x,
                                 "et" | "expand" => cfg.expand_threshold = x as u32,
                                 "mn" | "maxnodes" => cfg.max_nodes = x as usize,
                                 "mc" | "maxchildren" => {
-                                    cfg.max_children =
-                                        if x <= 0.0 { usize::MAX } else { x as usize }
+                                    cfg.max_children = if x <= 0.0 { usize::MAX } else { x as usize }
                                 }
                                 "wp" | "wallprob" => cfg.wall_prob = x,
                                 "noise" => cfg.root_noise = x,
@@ -110,6 +118,8 @@ impl Engine {
                                 "nn" => cfg.use_nn = x != 0.0,
                                 "pol" | "policy" => cfg.policy_mode = x as u8,
                                 "pt" | "poltemp" => cfg.policy_temp = x,
+                                "guard" | "gd" => cfg.use_guard = x != 0.0,
+                                "endgame" | "eg" => cfg.use_endgame_solver = x != 0.0,
                                 // w=0 elle tasarlanmış (varsayılan), w=1 öğrenilmiş
                                 "w" | "weights" => {
                                     cfg.weights = if x == 0.0 {
@@ -161,6 +171,10 @@ impl Engine {
     }
 
     pub fn choose(&mut self, pos: &Position) -> Choice {
+        self.choose_with_history(pos, &[])
+    }
+
+    pub fn choose_with_history(&mut self, pos: &Position, history: &[u64]) -> Choice {
         match self {
             Engine::Mcts {
                 cfg,
@@ -175,11 +189,13 @@ impl Engine {
                 let (mv, st) = if *threads > 1 {
                     search_parallel(pos, *ms, *iters, *threads, move |m, t| {
                         c.apply(m);
+                        m.history = history.to_vec();
                         m.reseed(sd.wrapping_mul(0x9e37_79b9).wrapping_add(t as u64 * 7 + 1));
                     })
                 } else {
                     let mut m = Mcts::new(sd);
                     c.apply(&mut m);
+                    m.history = history.to_vec();
                     match ms {
                         Some(v) => m.search_time(pos, *v),
                         None => m.search_rollouts(pos, *iters),

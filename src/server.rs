@@ -20,7 +20,7 @@ use crate::bitboard::WSLOTS;
 use crate::board::Position;
 use crate::engine::Engine;
 use crate::moves::{Move, MoveKind};
-use crate::notation::{from_fen, move_name, to_fen};
+use crate::notation::{from_fen, move_name, parse_move, to_fen};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -96,16 +96,20 @@ where
     }
 }
 
-fn respond(stream: &mut TcpStream, status: u16, ctype: &str, body: &str) -> std::io::Result<()> {
+fn respond(
+    stream: &mut TcpStream,
+    status: u16,
+    ctype: &str,
+    body: &str,
+) -> std::io::Result<()> {
     let reason = match status {
         200 => "OK",
         400 => "Bad Request",
         _ => "Not Found",
     };
     let head = format!(
-        // Sunucu yalnızca 127.0.0.1'e bağlı. CORS açık, böylece motoru
-        // başka bir yerel sayfadan ya da tarayıcı konsolundan `fetch` ile
-        // denemek mümkün.
+        // Sunucu yalnızca 127.0.0.1'e bağlı; CORS'u açmak tarayıcı uzantısının
+        // ve sayfa konsolundan yapılan denemelerin çalışmasını sağlıyor.
         "HTTP/1.1 {status} {reason}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
         body.len()
     );
@@ -135,9 +139,7 @@ fn deney_ozet() -> String {
         if path.extension().and_then(|e| e.to_str()) != Some("txt") {
             continue;
         }
-        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-            continue;
-        };
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { continue };
         let ad = stem.split("__").next().unwrap_or(stem).to_string();
         let metin = std::fs::read_to_string(&path).unwrap_or_default();
 
@@ -150,9 +152,7 @@ fn deney_ozet() -> String {
         let ara = metin.lines().rev().find_map(|l| {
             let i = l.rfind('[')?;
             let j = l.rfind(']')?;
-            if j < i {
-                return None;
-            }
+            if j < i { return None }
             let (a, b) = l[i + 1..j].split_once('-')?;
             Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
         });
@@ -181,11 +181,7 @@ fn deney_ozet() -> String {
         .map(|(ad, a, b, tam, parca)| {
             format!(
                 r#"{{"ad":"{}","a":{},"b":{},"biten":{},"parca":{}}}"#,
-                escape(ad),
-                a,
-                b,
-                tam,
-                parca
+                escape(ad), a, b, tam, parca
             )
         })
         .collect();
@@ -337,8 +333,32 @@ fn api_bot(query: &str) -> Result<String, String> {
     let seed = SEED.fetch_add(0x9e37_79b9_7f4a_7c15, Ordering::Relaxed) | 1;
     let mut engine = Engine::parse(&spec, seed);
 
+    let hist_param = param(query, "history").unwrap_or_default();
+    let mut history_hashes = Vec::new();
+    if !hist_param.is_empty() {
+        if hist_param.contains('/') {
+            for s in hist_param.split(',') {
+                if let Some(p) = from_fen(s.trim()) {
+                    history_hashes.push(p.hash);
+                }
+            }
+        } else {
+            let mut p = Position::start();
+            history_hashes.push(p.hash);
+            for tok in hist_param.split(',') {
+                let tok = tok.trim();
+                if !tok.is_empty() {
+                    if let Some(mv) = parse_move(&p, tok) {
+                        p.make(mv);
+                        history_hashes.push(p.hash);
+                    }
+                }
+            }
+        }
+    }
+
     let t = Instant::now();
-    let choice = engine.choose(&pos);
+    let choice = engine.choose_with_history(&pos, &history_hashes);
     let elapsed = t.elapsed().as_secs_f64();
 
     let mv = choice.mv.ok_or("motor hamle bulamadı")?;
@@ -388,9 +408,7 @@ fn api_replay(query: &str) -> Result<String, String> {
     for tok in raw.split([',', ' ', '\n']).filter(|t| !t.trim().is_empty()) {
         let tok = tok.trim();
         if pos.winner().is_some() {
-            return Err(format!(
-                "oyun {applied}. hamlede bitmişti, fazladan hamle: {tok}"
-            ));
+            return Err(format!("oyun {applied}. hamlede bitmişti, fazladan hamle: {tok}"));
         }
         let mv = crate::notation::parse_move(&pos, tok)
             .ok_or_else(|| format!("{}. hamle okunamadı ya da illegal: '{tok}'", applied + 1))?;
