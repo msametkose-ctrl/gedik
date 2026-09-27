@@ -754,7 +754,9 @@ fn test_repetition_penalty_breaks_shuttle_loop() {
     assert_ne!(name, "g7", "Motor çıkmaz sokak tuzağına (g7) girmemeli");
 }
 
+// Kanal indeksleri bilerek `k * 81 + hücre` biçiminde yazıldı (k = 0, 1, ...).
 #[test]
+#[allow(clippy::erasing_op, clippy::identity_op)]
 fn test_spatial_planes_validity() {
     let p = Position::start();
     let planes = gedik::nn::spatial_planes(&p);

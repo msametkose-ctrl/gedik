@@ -111,6 +111,8 @@ pub fn shortest_path_mask(pos: &Position, player: usize) -> u128 {
 }
 
 /// Pozisyonu 13 kanallı 9x9 uzamsal ızgara (spatial tensor) olarak kodlar.
+// Düzlem indeksleri bilerek `k * CELLS + hücre` biçiminde yazıldı (k = 0, 1, ...).
+#[allow(clippy::erasing_op, clippy::identity_op)]
 pub fn spatial_planes(pos: &Position) -> [f32; SPATIAL_SIZE] {
     let mut out = [0.0f32; SPATIAL_SIZE];
     let me = pos.side as usize;
