@@ -96,12 +96,7 @@ where
     }
 }
 
-fn respond(
-    stream: &mut TcpStream,
-    status: u16,
-    ctype: &str,
-    body: &str,
-) -> std::io::Result<()> {
+fn respond(stream: &mut TcpStream, status: u16, ctype: &str, body: &str) -> std::io::Result<()> {
     let reason = match status {
         200 => "OK",
         400 => "Bad Request",
@@ -139,7 +134,9 @@ fn deney_ozet() -> String {
         if path.extension().and_then(|e| e.to_str()) != Some("txt") {
             continue;
         }
-        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
         let ad = stem.split("__").next().unwrap_or(stem).to_string();
         let metin = std::fs::read_to_string(&path).unwrap_or_default();
 
@@ -152,7 +149,9 @@ fn deney_ozet() -> String {
         let ara = metin.lines().rev().find_map(|l| {
             let i = l.rfind('[')?;
             let j = l.rfind(']')?;
-            if j < i { return None }
+            if j < i {
+                return None;
+            }
             let (a, b) = l[i + 1..j].split_once('-')?;
             Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
         });
@@ -181,7 +180,11 @@ fn deney_ozet() -> String {
         .map(|(ad, a, b, tam, parca)| {
             format!(
                 r#"{{"ad":"{}","a":{},"b":{},"biten":{},"parca":{}}}"#,
-                escape(ad), a, b, tam, parca
+                escape(ad),
+                a,
+                b,
+                tam,
+                parca
             )
         })
         .collect();
@@ -408,7 +411,9 @@ fn api_replay(query: &str) -> Result<String, String> {
     for tok in raw.split([',', ' ', '\n']).filter(|t| !t.trim().is_empty()) {
         let tok = tok.trim();
         if pos.winner().is_some() {
-            return Err(format!("oyun {applied}. hamlede bitmişti, fazladan hamle: {tok}"));
+            return Err(format!(
+                "oyun {applied}. hamlede bitmişti, fazladan hamle: {tok}"
+            ));
         }
         let mv = crate::notation::parse_move(&pos, tok)
             .ok_or_else(|| format!("{}. hamle okunamadı ya da illegal: '{tok}'", applied + 1))?;

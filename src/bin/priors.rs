@@ -1,4 +1,4 @@
-﻿//! Bir pozisyondaki policy prior'larını dökümler — arama neye bakıyor?
+//! Bir pozisyondaki policy prior'larını dökümler — arama neye bakıyor?
 //!
 //! `priors [fen]`
 
@@ -27,4 +27,3 @@ fn main() {
         println!("  {n:>5}  {x:.5}  {bar}");
     }
 }
-

@@ -1,4 +1,4 @@
-﻿//! Verilen hamle listesinden itibaren iki motoru oynatır. Kim kazanıyor?
+//! Verilen hamle listesinden itibaren iki motoru oynatır. Kim kazanıyor?
 use gedik::board::Position;
 use gedik::engine::Engine;
 use gedik::notation::{move_name, parse_move};
@@ -37,9 +37,21 @@ fn main() {
             pos.make(mv);
         }
         let w = pos.winner().unwrap_or(2);
-        if w < 2 { wins[w] += 1; }
-        println!("oyun {g}: kazanan {} ({} hamle)  {}", if w==0 {"A"} else if w==1 {"B"} else {"-"}, line.len(), line.join(" "));
+        if w < 2 {
+            wins[w] += 1;
+        }
+        println!(
+            "oyun {g}: kazanan {} ({} hamle)  {}",
+            if w == 0 {
+                "A"
+            } else if w == 1 {
+                "B"
+            } else {
+                "-"
+            },
+            line.len(),
+            line.join(" ")
+        );
     }
     println!("\nA {} - {} B", wins[0], wins[1]);
 }
-

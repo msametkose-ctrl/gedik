@@ -1,4 +1,4 @@
-﻿//! Tek bir pozisyonda motorun ne dusundugunu gosterir.
+//! Tek bir pozisyonda motorun ne dusundugunu gosterir.
 //!
 //! Kaybedilen bir oyunu incelerken "motor burada neyi gormedi" sorusunun
 //! cevabi genelde kok cocuklarinin degerlerinde duruyor: hamleler birbirinden
@@ -42,4 +42,3 @@ fn main() {
         );
     }
 }
-

@@ -1,4 +1,4 @@
-﻿//! Sinir ağı eğitim verisi üretir (v2).
+//! Sinir ağı eğitim verisi üretir (v2).
 //!
 //! v1'den farkı: satırda **ham pozisyon** (FEN) ve **aramanın hamle dağılımı**
 //! var. 12 özellikli formülün çıktısını kaydetmek modeli o formülün
@@ -69,7 +69,11 @@ fn main() {
             let is_full = rng.unit() < 0.25;
             let current_iters = if is_full { iters } else { (iters / 8).max(600) };
             let strong = if pos.side == 0 { it0 } else { it1 } == iters;
-            let actual_iters = if strong { current_iters } else { (current_iters / 4).max(300) };
+            let actual_iters = if strong {
+                current_iters
+            } else {
+                (current_iters / 4).max(300)
+            };
 
             let mut engine = Engine::parse(
                 &format!("mcts:{actual_iters}:noise=0.15,nn={nn}"),
@@ -88,7 +92,10 @@ fn main() {
                         .filter(|t| t.1 > 0)
                         .map(|t| format!("{}:{:.4}", t.0.action_id(), t.1 as f32 / total as f32))
                         .collect();
-                    rows.push((format!("{};{};{}", to_fen(&pos), pos.ply, pi.join(" ")), pos.side as usize));
+                    rows.push((
+                        format!("{};{};{}", to_fen(&pos), pos.ply, pi.join(" ")),
+                        pos.side as usize,
+                    ));
                 }
             } else if strong {
                 rows.push((format!("{};{};", to_fen(&pos), pos.ply), pos.side as usize));
@@ -106,4 +113,3 @@ fn main() {
         eprintln!("oyun {}/{} bitti ({} yarım hamle)", g + 1, games, pos.ply);
     }
 }
-

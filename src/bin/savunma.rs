@@ -1,4 +1,4 @@
-﻿//! Bir pozisyonda tehdidi en çok azaltan hamleyi arar.
+//! Bir pozisyonda tehdidi en çok azaltan hamleyi arar.
 //! Savunma mümkün mü, yoksa motor haklı mı?
 use gedik::board::Position;
 use gedik::heuristics::{best_threat, candidate_moves};
@@ -11,7 +11,12 @@ fn main() {
     let opp = 1 - me;
     let base = best_threat(&p, opp, me);
     let d0 = p.distance(me).unwrap_or(0);
-    println!("sira: {}  yol {}  mevcut tehdit {}", if me == 0 { "A" } else { "B" }, d0, base);
+    println!(
+        "sira: {}  yol {}  mevcut tehdit {}",
+        if me == 0 { "A" } else { "B" },
+        d0,
+        base
+    );
 
     let mut rows: Vec<(u32, i64, String)> = Vec::new();
     for mv in candidate_moves(&p) {
@@ -33,7 +38,10 @@ fn main() {
         "\n=> en iyi savunma tehdidi {} -> {}  ({})",
         base,
         best,
-        if best < base { "SAVUNMA MUMKUN" } else { "savunma yok" }
+        if best < base {
+            "SAVUNMA MUMKUN"
+        } else {
+            "savunma yok"
+        }
     );
 }
-

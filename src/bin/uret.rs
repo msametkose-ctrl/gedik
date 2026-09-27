@@ -1,4 +1,4 @@
-﻿//! Sinir ağı eğitim verisi üretir (v2).
+//! Sinir ağı eğitim verisi üretir (v2).
 //!
 //! v1'den farkı: satırda **ham pozisyon** (FEN) ve **aramanın hamle dağılımı**
 //! var. 12 özellikli formülün çıktısını kaydetmek modeli o formülün
@@ -63,8 +63,14 @@ fn main() {
         };
         // Kök gürültüsü: aynı açılıştan hep aynı oyun çıkmasın, ve politika
         // hedefi tek bir hamleye çakılmasın.
-        let mut e0 = Engine::parse(&format!("mcts:{it0}:noise=0.15,nn={nn}"), seed + g as u64 * 31 + 1);
-        let mut e1 = Engine::parse(&format!("mcts:{it1}:noise=0.15,nn={nn}"), seed + g as u64 * 57 + 2);
+        let mut e0 = Engine::parse(
+            &format!("mcts:{it0}:noise=0.15,nn={nn}"),
+            seed + g as u64 * 31 + 1,
+        );
+        let mut e1 = Engine::parse(
+            &format!("mcts:{it1}:noise=0.15,nn={nn}"),
+            seed + g as u64 * 57 + 2,
+        );
         let mut rows: Vec<(String, usize)> = Vec::new();
 
         while pos.winner().is_none() && pos.ply < 400 {
@@ -84,7 +90,10 @@ fn main() {
                         .filter(|t| t.1 > 0)
                         .map(|t| format!("{}:{:.4}", t.0.action_id(), t.1 as f32 / total as f32))
                         .collect();
-                    rows.push((format!("{};{};{}", to_fen(&pos), pos.ply, pi.join(" ")), pos.side as usize));
+                    rows.push((
+                        format!("{};{};{}", to_fen(&pos), pos.ply, pi.join(" ")),
+                        pos.side as usize,
+                    ));
                 }
             }
             pos.make(mv);
@@ -100,4 +109,3 @@ fn main() {
         eprintln!("oyun {}/{} bitti ({} yarım hamle)", g + 1, games, pos.ply);
     }
 }
-

@@ -20,9 +20,9 @@
 //! iterasyondan sonra zaten güçlenmiyor (200 bin -> 2 milyon: +19 Elo).
 
 use crate::bitboard::{CELLS, WSLOTS};
-use crate::moves::NUM_ACTIONS;
 use crate::board::{goal_row, Position};
 use crate::heuristics::{features, threat_features, NUM_FEATURES, NUM_THREAT};
+use crate::moves::NUM_ACTIONS;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::OnceLock;
@@ -111,6 +111,8 @@ pub fn shortest_path_mask(pos: &Position, player: usize) -> u128 {
 }
 
 /// Pozisyonu 13 kanallı 9x9 uzamsal ızgara (spatial tensor) olarak kodlar.
+// Düzlem indeksleri bilerek `k * CELLS + hücre` biçiminde yazıldı (k = 0, 1, ...).
+#[allow(clippy::erasing_op, clippy::identity_op)]
 pub fn spatial_planes(pos: &Position) -> [f32; SPATIAL_SIZE] {
     let mut out = [0.0f32; SPATIAL_SIZE];
     let me = pos.side as usize;
@@ -211,7 +213,8 @@ fn shift_plane(src: &[f32], dr: isize, dc: isize, dst: &mut [f32; CELLS]) {
         let out_row = r * 9;
         let in_row = in_r * 9;
         let out_slice = &mut dst[out_row + c_start..out_row + c_end];
-        let in_slice = &src[in_row + (c_start as isize + dc) as usize..in_row + (c_end as isize + dc) as usize];
+        let in_slice = &src
+            [in_row + (c_start as isize + dc) as usize..in_row + (c_end as isize + dc) as usize];
         out_slice.copy_from_slice(in_slice);
     }
 }
@@ -553,7 +556,12 @@ impl MlpNet {
         a1
     }
 
-    pub fn policy(&self, pos: &Position, moves: &[crate::moves::Move], scratch: &mut Vec<u16>) -> Option<Vec<f32>> {
+    pub fn policy(
+        &self,
+        pos: &Position,
+        moves: &[crate::moves::Move],
+        scratch: &mut Vec<u16>,
+    ) -> Option<Vec<f32>> {
         let (pw, pb) = self.pol.as_ref()?;
         let a1 = self.trunk(pos, scratch);
         let mut out = Vec::with_capacity(moves.len());
@@ -655,7 +663,9 @@ impl Net {
             fn take(buf: &[u8], o: &mut usize, n: usize) -> Vec<f32> {
                 let base = *o;
                 let out = (0..n)
-                    .map(|i| f32::from_le_bytes(buf[base + i * 4..base + i * 4 + 4].try_into().unwrap()))
+                    .map(|i| {
+                        f32::from_le_bytes(buf[base + i * 4..base + i * 4 + 4].try_into().unwrap())
+                    })
                     .collect();
                 *o += n * 4;
                 out
@@ -681,7 +691,17 @@ impl Net {
                 None
             };
             Some(Net {
-                kind: NetKind::Mlp(MlpNet { h1, h2, pol, w1, b1, w2, b2, w3, b3 }),
+                kind: NetKind::Mlp(MlpNet {
+                    h1,
+                    h2,
+                    pol,
+                    w1,
+                    b1,
+                    w2,
+                    b2,
+                    w3,
+                    b3,
+                }),
             })
         } else if magic == b"QNN2" || magic == b"QNN3" || magic == b"QNN4" {
             let is_qnn3 = magic == b"QNN3";
@@ -692,7 +712,11 @@ impl Net {
             let channels = rd_u32(4);
             let n_blocks = rd_u32(8);
             let flags = rd_u32(12);
-            let has_policy = if is_qnn4 { (flags & 1) != 0 } else { flags != 0 };
+            let has_policy = if is_qnn4 {
+                (flags & 1) != 0
+            } else {
+                flags != 0
+            };
             let has_katago = if is_qnn4 { (flags & 2) != 0 } else { is_qnn3 };
             let has_se = if is_qnn4 { (flags & 4) != 0 } else { false };
             let has_heatmap = if is_qnn4 { (flags & 8) != 0 } else { false };
@@ -701,7 +725,9 @@ impl Net {
             fn take(buf: &[u8], o: &mut usize, n: usize) -> Vec<f32> {
                 let base = *o;
                 let out = (0..n)
-                    .map(|i| f32::from_le_bytes(buf[base + i * 4..base + i * 4 + 4].try_into().unwrap()))
+                    .map(|i| {
+                        f32::from_le_bytes(buf[base + i * 4..base + i * 4 + 4].try_into().unwrap())
+                    })
                     .collect();
                 *o += n * 4;
                 out
@@ -730,69 +756,152 @@ impl Net {
                     let se_f2w = take(buf, &mut o, channels * r_dim);
                     let se_f2b = take(buf, &mut o, channels);
                     Some(SeBlock {
-                        fc1: Linear { in_f: channels, out_f: r_dim, weights: se_f1w, bias: se_f1b },
-                        fc2: Linear { in_f: r_dim, out_f: channels, weights: se_f2w, bias: se_f2b },
+                        fc1: Linear {
+                            in_f: channels,
+                            out_f: r_dim,
+                            weights: se_f1w,
+                            bias: se_f1b,
+                        },
+                        fc2: Linear {
+                            in_f: r_dim,
+                            out_f: channels,
+                            weights: se_f2w,
+                            bias: se_f2b,
+                        },
                     })
                 } else {
                     None
                 };
 
                 blocks.push(ResBlock {
-                    conv1: Conv2d3x3 { in_c: channels, out_c: channels, weights: c1_w, bias: c1_b },
-                    conv2: Conv2d3x3 { in_c: channels, out_c: channels, weights: c2_w, bias: c2_b },
+                    conv1: Conv2d3x3 {
+                        in_c: channels,
+                        out_c: channels,
+                        weights: c1_w,
+                        bias: c1_b,
+                    },
+                    conv2: Conv2d3x3 {
+                        in_c: channels,
+                        out_c: channels,
+                        weights: c2_w,
+                        bias: c2_b,
+                    },
                     se,
                 });
             }
 
             let val_cw = take(buf, &mut o, 2 * channels);
             let val_cb = take(buf, &mut o, 2);
-            let val_conv = Conv2d1x1 { in_c: channels, out_c: 2, weights: val_cw, bias: val_cb };
+            let val_conv = Conv2d1x1 {
+                in_c: channels,
+                out_c: 2,
+                weights: val_cw,
+                bias: val_cb,
+            };
 
             let val_f1w = take(buf, &mut o, 32 * 162);
             let val_f1b = take(buf, &mut o, 32);
-            let val_fc1 = Linear { in_f: 162, out_f: 32, weights: val_f1w, bias: val_f1b };
+            let val_fc1 = Linear {
+                in_f: 162,
+                out_f: 32,
+                weights: val_f1w,
+                bias: val_f1b,
+            };
 
             let val_f2w = take(buf, &mut o, 1 * 32);
             let val_f2b = take(buf, &mut o, 1);
-            let val_fc2 = Linear { in_f: 32, out_f: 1, weights: val_f2w, bias: val_f2b };
+            let val_fc2 = Linear {
+                in_f: 32,
+                out_f: 1,
+                weights: val_f2w,
+                bias: val_f2b,
+            };
 
             let (pol_conv, pol_fc) = if has_policy {
                 let pol_cw = take(buf, &mut o, 4 * channels);
                 let pol_cb = take(buf, &mut o, 4);
-                let pconv = Conv2d1x1 { in_c: channels, out_c: 4, weights: pol_cw, bias: pol_cb };
+                let pconv = Conv2d1x1 {
+                    in_c: channels,
+                    out_c: 4,
+                    weights: pol_cw,
+                    bias: pol_cb,
+                };
 
                 let pol_fw = take(buf, &mut o, NUM_ACTIONS * 324);
                 let pol_fb = take(buf, &mut o, NUM_ACTIONS);
-                let pfc = Linear { in_f: 324, out_f: NUM_ACTIONS, weights: pol_fw, bias: pol_fb };
+                let pfc = Linear {
+                    in_f: 324,
+                    out_f: NUM_ACTIONS,
+                    weights: pol_fw,
+                    bias: pol_fb,
+                };
                 eprintln!("  (ResNet politika başı yüklendi)");
                 (Some(pconv), Some(pfc))
             } else {
                 (None, None)
             };
 
-            let (moves_conv, moves_fc1, moves_fc2, delta_conv, delta_fc1, delta_fc2) = if has_katago {
+            let (moves_conv, moves_fc1, moves_fc2, delta_conv, delta_fc1, delta_fc2) = if has_katago
+            {
                 let mc_w = take(buf, &mut o, 1 * channels);
                 let mc_b = take(buf, &mut o, 1);
-                let mconv = Conv2d1x1 { in_c: channels, out_c: 1, weights: mc_w, bias: mc_b };
+                let mconv = Conv2d1x1 {
+                    in_c: channels,
+                    out_c: 1,
+                    weights: mc_w,
+                    bias: mc_b,
+                };
                 let mf1_w = take(buf, &mut o, 32 * 81);
                 let mf1_b = take(buf, &mut o, 32);
-                let mfc1 = Linear { in_f: 81, out_f: 32, weights: mf1_w, bias: mf1_b };
+                let mfc1 = Linear {
+                    in_f: 81,
+                    out_f: 32,
+                    weights: mf1_w,
+                    bias: mf1_b,
+                };
                 let mf2_w = take(buf, &mut o, 1 * 32);
                 let mf2_b = take(buf, &mut o, 1);
-                let mfc2 = Linear { in_f: 32, out_f: 1, weights: mf2_w, bias: mf2_b };
+                let mfc2 = Linear {
+                    in_f: 32,
+                    out_f: 1,
+                    weights: mf2_w,
+                    bias: mf2_b,
+                };
 
                 let dc_w = take(buf, &mut o, 1 * channels);
                 let dc_b = take(buf, &mut o, 1);
-                let dconv = Conv2d1x1 { in_c: channels, out_c: 1, weights: dc_w, bias: dc_b };
+                let dconv = Conv2d1x1 {
+                    in_c: channels,
+                    out_c: 1,
+                    weights: dc_w,
+                    bias: dc_b,
+                };
                 let df1_w = take(buf, &mut o, 32 * 81);
                 let df1_b = take(buf, &mut o, 32);
-                let dfc1 = Linear { in_f: 81, out_f: 32, weights: df1_w, bias: df1_b };
+                let dfc1 = Linear {
+                    in_f: 81,
+                    out_f: 32,
+                    weights: df1_w,
+                    bias: df1_b,
+                };
                 let df2_w = take(buf, &mut o, 1 * 32);
                 let df2_b = take(buf, &mut o, 1);
-                let dfc2 = Linear { in_f: 32, out_f: 1, weights: df2_w, bias: df2_b };
+                let dfc2 = Linear {
+                    in_f: 32,
+                    out_f: 1,
+                    weights: df2_w,
+                    bias: df2_b,
+                };
 
                 eprintln!("  (KataGo aciliyet & yol farkı yardımcı başlıkları yüklendi)");
-                (Some(mconv), Some(mfc1), Some(mfc2), Some(dconv), Some(dfc1), Some(dfc2))
+                (
+                    Some(mconv),
+                    Some(mfc1),
+                    Some(mfc2),
+                    Some(dconv),
+                    Some(dfc1),
+                    Some(dfc2),
+                )
             } else {
                 (None, None, None, None, None, None)
             };
@@ -801,7 +910,12 @@ impl Net {
                 let hc_w = take(buf, &mut o, 1 * channels);
                 let hc_b = take(buf, &mut o, 1);
                 eprintln!("  (9x9 Ulaşılabilirlik Isı Haritası başlığı yüklendi)");
-                Some(Conv2d1x1 { in_c: channels, out_c: 1, weights: hc_w, bias: hc_b })
+                Some(Conv2d1x1 {
+                    in_c: channels,
+                    out_c: 1,
+                    weights: hc_w,
+                    bias: hc_b,
+                })
             } else {
                 None
             };
@@ -837,7 +951,12 @@ impl Net {
         }
     }
 
-    pub fn policy(&self, pos: &Position, moves: &[crate::moves::Move], scratch: &mut Vec<u16>) -> Option<Vec<f32>> {
+    pub fn policy(
+        &self,
+        pos: &Position,
+        moves: &[crate::moves::Move],
+        scratch: &mut Vec<u16>,
+    ) -> Option<Vec<f32>> {
         match &self.kind {
             NetKind::Mlp(m) => m.policy(pos, moves, scratch),
             NetKind::Res(r) => r.policy(pos, moves),
@@ -887,8 +1006,15 @@ pub fn net_from(yol: &str) -> Option<&'static Net> {
         Ok(buf) => match Net::from_bytes(&buf) {
             Some(n) => {
                 match &n.kind {
-                    NetKind::Mlp(m) => eprintln!("ag yuklendi: {anahtar} (MLP: {} -> {} -> {} -> 1)", N_IN, m.h1, m.h2),
-                    NetKind::Res(r) => eprintln!("ag yuklendi: {anahtar} (2D ResNet: 13 kanallı, {} kanal, {} blok)", r.channels, r.blocks.len()),
+                    NetKind::Mlp(m) => eprintln!(
+                        "ag yuklendi: {anahtar} (MLP: {} -> {} -> {} -> 1)",
+                        N_IN, m.h1, m.h2
+                    ),
+                    NetKind::Res(r) => eprintln!(
+                        "ag yuklendi: {anahtar} (2D ResNet: 13 kanallı, {} kanal, {} blok)",
+                        r.channels,
+                        r.blocks.len()
+                    ),
                 }
                 Some(&*Box::leak(Box::new(n)))
             }
@@ -932,8 +1058,15 @@ pub fn net() -> Option<&'static Net> {
                 match Net::from_bytes(&buf) {
                     Some(n) => {
                         match &n.kind {
-                            NetKind::Mlp(m) => eprintln!("ag.bin yüklendi (MLP: {} -> {} -> {} -> 1)", N_IN, m.h1, m.h2),
-                            NetKind::Res(r) => eprintln!("ag.bin yüklendi (2D ResNet: 13 kanallı, {} kanal, {} blok)", r.channels, r.blocks.len()),
+                            NetKind::Mlp(m) => eprintln!(
+                                "ag.bin yüklendi (MLP: {} -> {} -> {} -> 1)",
+                                N_IN, m.h1, m.h2
+                            ),
+                            NetKind::Res(r) => eprintln!(
+                                "ag.bin yüklendi (2D ResNet: 13 kanallı, {} kanal, {} blok)",
+                                r.channels,
+                                r.blocks.len()
+                            ),
                         }
                         return Some(n);
                     }

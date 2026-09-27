@@ -1,4 +1,4 @@
-﻿//! Self-play oynayıp değer fonksiyonu için eğitim verisi üretir.
+//! Self-play oynayıp değer fonksiyonu için eğitim verisi üretir.
 //!
 //! Her pozisyon için özellikler + oyunun gerçek sonucu (sıradaki oyuncu
 //! kazandı mı) yazılır. Çıktı CSV, `tools/fit.py` ile lojistik regresyona
@@ -79,4 +79,3 @@ fn main() {
         eprintln!("oyun {}/{} bitti ({} yarım hamle)", g + 1, games, pos.ply);
     }
 }
-

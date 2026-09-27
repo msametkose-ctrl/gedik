@@ -1,4 +1,4 @@
-﻿use gedik::board::Position;
+use gedik::board::Position;
 use gedik::notation::*;
 
 fn normalize_move(s: &str) -> String {
@@ -29,13 +29,23 @@ fn analyze_game(title: &str, moves_raw: &str) {
         let p_turn = pos.side as usize;
         let d0 = pos.distance(0).unwrap_or(99) as i32;
         let d1 = pos.distance(1).unwrap_or(99) as i32;
-        let val = if let Some(ref n) = net { n.value(&pos, &mut scratch) } else { 0.5 };
-        
+        let val = if let Some(ref n) = net {
+            n.value(&pos, &mut scratch)
+        } else {
+            0.5
+        };
+
         let norm_str = normalize_move(m_str);
         let mv = match parse_move(&pos, &norm_str) {
             Some(m) => m,
             None => {
-                println!("Turn {:2} (Ply {:2}): Cannot parse/illegal move '{}' (normalized: '{}')", (turn/2)+1, turn + 1, m_str, norm_str);
+                println!(
+                    "Turn {:2} (Ply {:2}): Cannot parse/illegal move '{}' (normalized: '{}')",
+                    (turn / 2) + 1,
+                    turn + 1,
+                    m_str,
+                    norm_str
+                );
                 let legals = pos.legal_moves();
                 print!("  Legal moves ({}): ", legals.len());
                 for lm in legals.iter().take(10) {
@@ -61,7 +71,16 @@ fn analyze_game(title: &str, moves_raw: &str) {
 
         pos.make(mv);
         if let Some(w) = pos.winner() {
-            println!(">>> GAME OVER at Ply {}: Winner is P{} ({}) <<<", turn + 1, w, if w == 0 { "White/Bottom (P0)" } else { "Black/Top (P1)" });
+            println!(
+                ">>> GAME OVER at Ply {}: Winner is P{} ({}) <<<",
+                turn + 1,
+                w,
+                if w == 0 {
+                    "White/Bottom (P0)"
+                } else {
+                    "Black/Top (P1)"
+                }
+            );
             break;
         }
     }
@@ -82,4 +101,3 @@ fn main() {
         analyze_game(title, moves);
     }
 }
-

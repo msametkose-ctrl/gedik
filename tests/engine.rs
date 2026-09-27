@@ -2,7 +2,7 @@
 
 use gedik::bitboard::*;
 use gedik::board::Position;
-use gedik::heuristics::{candidate_moves, candidate_moves_filtered, value_to_move, Rng, playout};
+use gedik::heuristics::{candidate_moves, candidate_moves_filtered, playout, value_to_move, Rng};
 use gedik::mcts::{Leaf, Mcts};
 use gedik::search::Searcher;
 
@@ -123,14 +123,22 @@ fn engines_take_an_available_win() {
     let mv = mv.expect("mcts hamle bulmalı");
     let mut q = p;
     q.make(mv);
-    assert_eq!(q.winner(), Some(0), "MCTS kazanan hamleyi almalı, oynadığı: {mv:?}");
+    assert_eq!(
+        q.winner(),
+        Some(0),
+        "MCTS kazanan hamleyi almalı, oynadığı: {mv:?}"
+    );
 
     let mut ab = Searcher::new(16);
     let (mv, _) = ab.best_move(&p, 6, 500);
     let mv = mv.expect("ab hamle bulmalı");
     let mut q = p;
     q.make(mv);
-    assert_eq!(q.winner(), Some(0), "alpha-beta kazanan hamleyi almalı, oynadığı: {mv:?}");
+    assert_eq!(
+        q.winner(),
+        Some(0),
+        "alpha-beta kazanan hamleyi almalı, oynadığı: {mv:?}"
+    );
 }
 
 #[test]
@@ -146,7 +154,10 @@ fn mcts_only_ever_returns_legal_moves() {
             mc.leaf = leaf;
             let (mv, st) = mc.search_rollouts(&p, 600);
             let mv = mv.expect("hamle dönmeli");
-            assert!(p.is_legal(mv), "MCTS illegal hamle döndü: {mv:?} ({leaf:?})");
+            assert!(
+                p.is_legal(mv),
+                "MCTS illegal hamle döndü: {mv:?} ({leaf:?})"
+            );
             assert!(st.rollouts > 0);
         }
     }
@@ -161,10 +172,7 @@ fn value_leaf_is_deterministic() {
     let mut b = Mcts::new(999_999);
     let (mv_a, _) = a.search_rollouts(&p, 4000);
     let (mv_b, _) = b.search_rollouts(&p, 4000);
-    assert_eq!(
-        mv_a, mv_b,
-        "Leaf::Value modunda seed sonucu değiştirmemeli"
-    );
+    assert_eq!(mv_a, mv_b, "Leaf::Value modunda seed sonucu değiştirmemeli");
 }
 
 // ------------------------------------------------- policy prior (PUCT)
@@ -242,7 +250,10 @@ fn walls_that_hurt_both_rank_below_advancing() {
         .find(|(m, _)| gedik::notation::move_name(&p, **m) == "e2")
         .map(|(_, &x)| x)
         .unwrap();
-    assert!(advance > wall_max * 3.0, "ilerleme baskın olmalı: {advance} vs {wall_max}");
+    assert!(
+        advance > wall_max * 3.0,
+        "ilerleme baskın olmalı: {advance} vs {wall_max}"
+    );
     assert!(wall_max > 0.0, "duvarlar tamamen sıfırlanmamalı");
 }
 
@@ -267,7 +278,10 @@ fn value_is_certain_at_terminal_positions() {
 fn value_prefers_being_closer_and_richer() {
     let base = Position::start();
     let v_start = value_to_move(&base);
-    assert!(v_start > 0.2 && v_start < 0.8, "başlangıç dengeli olmalı: {v_start}");
+    assert!(
+        v_start > 0.2 && v_start < 0.8,
+        "başlangıç dengeli olmalı: {v_start}"
+    );
 
     // Aynı pozisyon ama sıradaki oyuncunun duvar üstünlüğü var.
     //
@@ -286,7 +300,10 @@ fn value_prefers_being_closer_and_richer() {
     let mut ahead = base;
     ahead.pawn[0] = cell(2, 4) as u8;
     ahead.hash = ahead.compute_hash();
-    assert!(value_to_move(&ahead) > v_start, "yakın olmak değeri artırmalı");
+    assert!(
+        value_to_move(&ahead) > v_start,
+        "yakın olmak değeri artırmalı"
+    );
 }
 
 /// Duvar üstünlüğü değerlidir ama yarışı ezmez.
@@ -331,7 +348,11 @@ fn mcts_plays_the_immediate_win() {
     let mv = mv.expect("hamle bulunmalı");
     let mut q = p;
     q.make(mv);
-    assert_eq!(q.winner(), Some(0), "kazanan hamle oynanmalı, oynanan: {mv:?}");
+    assert_eq!(
+        q.winner(),
+        Some(0),
+        "kazanan hamle oynanmalı, oynanan: {mv:?}"
+    );
     assert!(st.rollouts <= 400);
 }
 
@@ -409,9 +430,24 @@ fn elo_orders_a_transitive_ladder() {
     use gedik::rating::{solve, Pairing};
     // A, B'yi %75; B, C'yi %75; A, C'yi %90 yeniyor.
     let ps = vec![
-        Pairing { a: 0, b: 1, a_score: 30.0, games: 40.0 },
-        Pairing { a: 1, b: 2, a_score: 30.0, games: 40.0 },
-        Pairing { a: 0, b: 2, a_score: 36.0, games: 40.0 },
+        Pairing {
+            a: 0,
+            b: 1,
+            a_score: 30.0,
+            games: 40.0,
+        },
+        Pairing {
+            a: 1,
+            b: 2,
+            a_score: 30.0,
+            games: 40.0,
+        },
+        Pairing {
+            a: 0,
+            b: 2,
+            a_score: 36.0,
+            games: 40.0,
+        },
     ];
     let r = solve(3, &ps, 4000);
     assert!(r[0] > r[1], "A, B'den yüksek olmalı: {r:?}");
@@ -426,7 +462,12 @@ fn elo_orders_a_transitive_ladder() {
 #[test]
 fn elo_handles_a_single_pairing() {
     use gedik::rating::{solve, Pairing};
-    let ps = vec![Pairing { a: 0, b: 1, a_score: 8.0, games: 10.0 }];
+    let ps = vec![Pairing {
+        a: 0,
+        b: 1,
+        a_score: 8.0,
+        games: 10.0,
+    }];
     let r = solve(2, &ps, 2000);
     assert!(r[0] > r[1]);
     assert!((r[0] + r[1]).abs() < 1e-6);
@@ -496,7 +537,10 @@ fn walls_cannot_rescue_a_lost_race() {
     p.hash = p.compute_hash();
     let d0 = p.distance(0).unwrap();
     let d1 = p.distance(1).unwrap();
-    assert!(d0 > d1 + 3, "kurulum: A belirgin geride olmalı ({d0} vs {d1})");
+    assert!(
+        d0 > d1 + 3,
+        "kurulum: A belirgin geride olmalı ({d0} vs {d1})"
+    );
     assert!(
         value_to_move(&p) < 0.3,
         "10 duvar da olsa kapanmayacak açık kazanç sayılmamalı"
@@ -520,7 +564,10 @@ fn does_not_shuffle_when_lost() {
     p.walls = [3, 3];
     p.hash = p.compute_hash();
     let start_dist = p.distance(0).unwrap();
-    assert!(value_to_move(&p) < 0.2, "kurulum: pozisyon kaybedilmiş olmalı");
+    assert!(
+        value_to_move(&p) < 0.2,
+        "kurulum: pozisyon kaybedilmiş olmalı"
+    );
 
     let mut played = Vec::new();
     for _ in 0..3 {
@@ -551,7 +598,11 @@ fn does_not_shuffle_when_lost() {
         "kayıp pozisyonda bile hedefe yaklaşmalı: {start_dist} -> {end_dist}, hamleler {played:?}"
     );
     assert!(
-        played.iter().collect::<std::collections::HashSet<_>>().len() == played.len(),
+        played
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+            == played.len(),
         "aynı hamle tekrar etmemeli (mekik): {played:?}"
     );
 }
@@ -602,7 +653,10 @@ fn test_exact_race_winner_and_jump_parity() {
     p.hash = p.compute_hash();
 
     let winner = gedik::heuristics::exact_race_winner(&p);
-    assert_eq!(winner, 1, "0 duvarlı simetrik yarışta 2. oyuncu (B) atlama paritesiyle kazanmalı");
+    assert_eq!(
+        winner, 1,
+        "0 duvarlı simetrik yarışta 2. oyuncu (B) atlama paritesiyle kazanmalı"
+    );
 
     // A'nın 1 kare önde başladığı asimetrik yarışta A kazanmalı
     let mut p_lead = Position::start();
@@ -610,7 +664,11 @@ fn test_exact_race_winner_and_jump_parity() {
     p_lead.pawn[1] = cell(0, 4) as u8; // e9
     p_lead.walls = [0, 0];
     p_lead.hash = p_lead.compute_hash();
-    assert_eq!(gedik::heuristics::exact_race_winner(&p_lead), 0, "Önde başlayan A kazanmalı");
+    assert_eq!(
+        gedik::heuristics::exact_race_winner(&p_lead),
+        0,
+        "Önde başlayan A kazanmalı"
+    );
 }
 
 #[test]
@@ -628,8 +686,14 @@ fn test_subtree_reuse_preserves_validity() {
     next_pos.make(chosen);
 
     let (next_mv, next_st) = mc.search_rollouts(&next_pos, 500);
-    assert!(next_mv.is_some(), "Alt ağaçtan sonraki arama legal hamle üretmeli");
-    assert!(next_pos.is_legal(next_mv.unwrap()), "Üretilen hamle legal olmalı");
+    assert!(
+        next_mv.is_some(),
+        "Alt ağaçtan sonraki arama legal hamle üretmeli"
+    );
+    assert!(
+        next_pos.is_legal(next_mv.unwrap()),
+        "Üretilen hamle legal olmalı"
+    );
     assert!(next_st.rollouts >= 500);
 }
 
@@ -639,7 +703,12 @@ fn test_best_threat_2step_bounds() {
     p.walls = [5, 5];
     let t1 = gedik::heuristics::best_threat(&p, 0, 1);
     let t2 = gedik::heuristics::best_threat_2step(&p, 0, 1);
-    assert!(t2 >= t1, "2-adımlı tehdit tek adımlı tehditten küçük olamaz ({} vs {})", t2, t1);
+    assert!(
+        t2 >= t1,
+        "2-adımlı tehdit tek adımlı tehditten küçük olamaz ({} vs {})",
+        t2,
+        t1
+    );
 }
 
 #[test]
@@ -649,7 +718,11 @@ fn test_mcts_transposition_table_cache() {
     let (_mv, _st) = mc.search_rollouts(&pos, 200);
 
     // Arama sırasında yaprak pozisyonları TT'ye kaydedilmiş olmalı
-    assert!(mc.tt.len() > 0, "Arama sırasında TT tablosuna pozisyonlar kaydedilmeli (len={})", mc.tt.len());
+    assert!(
+        mc.tt.len() > 0,
+        "Arama sırasında TT tablosuna pozisyonlar kaydedilmeli (len={})",
+        mc.tt.len()
+    );
 }
 
 #[test]
@@ -657,7 +730,10 @@ fn test_chokepoints_detection() {
     let p = Position::start();
     let ch0 = gedik::heuristics::chokepoints(&p, 0);
     // Başlangıçta geniş açık tahtada e-sütunu koridoru darboğaz olarak taranabilmeli
-    assert!(ch0 != 0, "Açık tahtada en kısa yol darboğazları tespit edilmeli");
+    assert!(
+        ch0 != 0,
+        "Açık tahtada en kısa yol darboğazları tespit edilmeli"
+    );
 }
 
 #[test]
@@ -678,16 +754,18 @@ fn test_repetition_penalty_breaks_shuttle_loop() {
     assert_ne!(name, "g7", "Motor çıkmaz sokak tuzağına (g7) girmemeli");
 }
 
+// Kanal indeksleri bilerek `k * 81 + hücre` biçiminde yazıldı (k = 0, 1, ...).
 #[test]
+#[allow(clippy::erasing_op, clippy::identity_op)]
 fn test_spatial_planes_validity() {
     let p = Position::start();
     let planes = gedik::nn::spatial_planes(&p);
     assert_eq!(planes.len(), 13 * 81);
-    
+
     // Kanal 0 (benim piyonum e1) 1.0 olmalı
     let e1_idx = 76; // e1 hücresi (row 8, col 4: 8*9 + 4 = 76)
     assert_eq!(planes[0 * 81 + e1_idx], 1.0);
-    
+
     // Kanal 1 (rakip piyon e9) 1.0 olmalı
     let e9_idx = 4; // e9 hücresi (row 0, col 4: 0*9 + 4 = 4)
     assert_eq!(planes[1 * 81 + e9_idx], 1.0);
@@ -703,6 +781,8 @@ fn test_shortest_path_mask_validity() {
     let mask0 = gedik::nn::shortest_path_mask(&p, 0);
     // Başlangıçta piyon hücresi dahil hedefe doğru en az 9 hücre maskede işaretli olmalı
     assert!(mask0.count_ones() >= 9);
-    assert!(mask0 & (1u128 << 76) != 0, "Başlangıç piyon hücresi en kısa yolda yer almalı");
+    assert!(
+        mask0 & (1u128 << 76) != 0,
+        "Başlangıç piyon hücresi en kısa yolda yer almalı"
+    );
 }
-

@@ -60,7 +60,12 @@ impl EndgameSolver {
     }
 
     /// Pozisyonu kesin olarak çözer. Eğer kazanma/kaybetme hattı kanıtlanırsa hamleyi ve skoru döner.
-    pub fn solve(&mut self, pos: &Position, max_depth: u32, timeout_ms: u64) -> Option<(Move, i32)> {
+    pub fn solve(
+        &mut self,
+        pos: &Position,
+        max_depth: u32,
+        timeout_ms: u64,
+    ) -> Option<(Move, i32)> {
         self.nodes = 0;
         self.stopped = false;
         self.deadline = Some(Instant::now() + Duration::from_millis(timeout_ms));

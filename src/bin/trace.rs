@@ -1,4 +1,4 @@
-﻿//! Tek bir rollout'u hamle hamle izler.
+//! Tek bir rollout'u hamle hamle izler.
 
 use gedik::board::{goal_row, Position};
 use gedik::heuristics::{playout_move, race_winner, Rng};
@@ -48,4 +48,3 @@ fn main() {
     }
     println!("60 adımda bitmedi");
 }
-

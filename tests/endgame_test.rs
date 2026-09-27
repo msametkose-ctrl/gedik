@@ -1,4 +1,4 @@
-﻿use gedik::board::Position;
+use gedik::board::Position;
 use gedik::endgame::EndgameSolver;
 use gedik::notation::parse_move;
 
@@ -13,4 +13,3 @@ fn test_endgame_solver_immediate_win() {
     let result = solver.solve(&pos, 4, 100);
     assert!(result.is_some(), "Endgame solver bir hamle bulmalı");
 }
-

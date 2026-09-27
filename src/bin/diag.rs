@@ -1,4 +1,4 @@
-﻿//! Rollout politikasının ayırt etme gücünü ölçer.
+//! Rollout politikasının ayırt etme gücünü ölçer.
 //!
 //! Soru: saf rollout, açıkça iyi bir hamleyi (piyonu ilerlet) açıkça kötü bir
 //! hamleden (kendi önüne duvar koy) ayırt edebiliyor mu? Ayırt edemiyorsa
@@ -48,8 +48,11 @@ fn main() {
         }
         rows.sort_by(|a, b| b.0.total_cmp(&a.0));
         for (wr, se, mv_str, label) in rows {
-            println!("  {mv_str:<5} A kazanma {:.4} ± {:.4}   {label}", wr, 1.96 * se);
+            println!(
+                "  {mv_str:<5} A kazanma {:.4} ± {:.4}   {label}",
+                wr,
+                1.96 * se
+            );
         }
     }
 }
-

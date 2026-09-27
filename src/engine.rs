@@ -88,7 +88,9 @@ impl Engine {
                         cfg.c_uct = v;
                     } else {
                         for kv in spec.split(',') {
-                            let Some((k, v)) = kv.split_once('=') else { continue };
+                            let Some((k, v)) = kv.split_once('=') else {
+                                continue;
+                            };
                             // `ag=` degeri bir dosya yolu, sayi degil; sayiya
                             // cevirme denemesinden ONCE ele alinmali yoksa
                             // sessizce atlanir. Iki agi ayni maca sokan anahtar
@@ -107,7 +109,8 @@ impl Engine {
                                 "et" | "expand" => cfg.expand_threshold = x as u32,
                                 "mn" | "maxnodes" => cfg.max_nodes = x as usize,
                                 "mc" | "maxchildren" => {
-                                    cfg.max_children = if x <= 0.0 { usize::MAX } else { x as usize }
+                                    cfg.max_children =
+                                        if x <= 0.0 { usize::MAX } else { x as usize }
                                 }
                                 "wp" | "wallprob" => cfg.wall_prob = x,
                                 "noise" => cfg.root_noise = x,
