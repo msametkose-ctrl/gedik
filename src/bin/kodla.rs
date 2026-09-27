@@ -1,4 +1,4 @@
-﻿//! `gendata2` CSV'sini eğitime hazır ikili dosyaya çevirir.
+//! `gendata2` CSV'sini eğitime hazır ikili dosyaya çevirir.
 //!
 //! Neden ayrı bir araç: kodlamayı **yalnızca Rust yapıyor**. Eğitim betiği
 //! FEN'i görmüyor, sadece burada üretilen indeks listesini okuyor. Python ile
@@ -13,14 +13,20 @@
 //! Kullanım:
 //!     kodla <girdi.csv> <cikti.bin>
 //!     kodla --spatial <girdi.csv> <cikti.bin>
-use gedik::nn::{dense_features, sparse_indices, spatial_planes, N_DENSE, N_SPARSE, SPATIAL_CHANNELS, SPATIAL_SIZE};
+use gedik::nn::{
+    dense_features, sparse_indices, spatial_planes, N_DENSE, N_SPARSE, SPATIAL_CHANNELS,
+    SPATIAL_SIZE,
+};
 use gedik::notation::from_fen;
 use std::io::{BufRead, BufWriter, Write};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let is_spatial = args.iter().any(|a| a == "--spatial" || a == "--katago");
-    let clean_args: Vec<String> = args.into_iter().filter(|a| a != "--spatial" && a != "--katago").collect();
+    let clean_args: Vec<String> = args
+        .into_iter()
+        .filter(|a| a != "--spatial" && a != "--katago")
+        .collect();
 
     if clean_args.len() < 3 {
         eprintln!("Kullanım: kodla [--spatial|--katago] <girdi.csv> <cikti.bin>");
@@ -40,7 +46,8 @@ fn main() {
     if is_spatial {
         w.write_all(b"QDT5").unwrap();
         w.write_all(&0u32.to_le_bytes()).unwrap();
-        w.write_all(&(SPATIAL_CHANNELS as u32).to_le_bytes()).unwrap();
+        w.write_all(&(SPATIAL_CHANNELS as u32).to_le_bytes())
+            .unwrap();
         w.write_all(&(SPATIAL_SIZE as u32).to_le_bytes()).unwrap();
         w.write_all(&(P as u32).to_le_bytes()).unwrap();
     } else {
@@ -92,7 +99,12 @@ fn main() {
                 continue;
             }
         } else if parts.len() >= 2 && (parts[1] == "0" || parts[1] == "1") {
-            (parts[1].parse::<f32>().unwrap(), 0.0, 0.0, parts.get(2).copied().unwrap_or(""))
+            (
+                parts[1].parse::<f32>().unwrap(),
+                0.0,
+                0.0,
+                parts.get(2).copied().unwrap_or(""),
+            )
         } else {
             atlanan += 1;
             continue;
@@ -159,4 +171,3 @@ fn main() {
 
     println!("{n} satir yazildi ({atlanan} atlandi, spatial={is_spatial}) -> {co}");
 }
-

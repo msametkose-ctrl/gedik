@@ -1,4 +1,4 @@
-﻿//! Verilen motorun 3 saniyede kaç iterasyon yaptığını ölçer.
+//! Verilen motorun 3 saniyede kaç iterasyon yaptığını ölçer.
 use gedik::board::Position;
 use gedik::engine::Engine;
 
@@ -9,4 +9,3 @@ fn main() {
     let c = e.choose(&p);
     println!("{spec:<34} {:>10} iterasyon   {}", c.work, c.info);
 }
-

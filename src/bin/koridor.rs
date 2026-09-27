@@ -1,12 +1,12 @@
-﻿//! Yol dayanıklılığı: en kısa yol koridorunun en dar yeri kaç kare?
+//! Yol dayanıklılığı: en kısa yol koridorunun en dar yeri kaç kare?
 //!
 //! Fikir: değerlendirme "yolum kaç" diyor ama "yolum kırılabilir mi" demiyor.
 //! Koridor tek kareye düşüyorsa rakip tek duvarla oradan kesiyor. Bunu
 //! mesafe alanından neredeyse bedavaya çıkarabiliyoruz — alan zaten
 //! hesaplanıyor.
 use gedik::bitboard::CELLS;
-use gedik::board::Position;
 use gedik::board::goal_row;
+use gedik::board::Position;
 use gedik::notation::parse_move;
 
 /// (yol, en dar koridor genisligi, katman genislikleri)
@@ -58,7 +58,9 @@ fn main() {
         let mut q = pos;
         q.make(mv);
         let (d, dar, kat) = corridor(&q, me);
-        println!("{:>5}  yol {d}  en dar koridor {dar}  katmanlar {kat:?}", mv_s.trim());
+        println!(
+            "{:>5}  yol {d}  en dar koridor {dar}  katmanlar {kat:?}",
+            mv_s.trim()
+        );
     }
 }
-

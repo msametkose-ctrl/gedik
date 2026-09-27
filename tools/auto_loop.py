@@ -1,4 +1,4 @@
-﻿"""
+"""
 Quoridor AI - Sürekli Otomatik Pilot Eğitim Döngüsü (Continuous RL Loop)
 ========================================================================
 Bu script:

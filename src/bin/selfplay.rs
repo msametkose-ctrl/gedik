@@ -1,4 +1,4 @@
-﻿use gedik::board::Position;
+use gedik::board::Position;
 use gedik::engine::Engine;
 use gedik::heuristics::{candidate_moves, Rng};
 use gedik::notation::to_fen;
@@ -18,7 +18,10 @@ fn main() {
             .map(|n| n.get())
             .unwrap_or(8)
     });
-    let out_path: String = args.get(4).cloned().unwrap_or_else(|| "selfplay_v2.csv".to_string());
+    let out_path: String = args
+        .get(4)
+        .cloned()
+        .unwrap_or_else(|| "selfplay_v2.csv".to_string());
 
     println!("=== AlphaZero İkinci Nesil Self-Play Üretici ===");
     println!("  Toplam Oyun:   {}", total_games);
@@ -96,7 +99,9 @@ fn main() {
                             .top
                             .iter()
                             .filter(|t| t.1 > 0)
-                            .map(|t| format!("{}:{:.4}", t.0.action_id(), t.1 as f32 / total as f32))
+                            .map(|t| {
+                                format!("{}:{:.4}", t.0.action_id(), t.1 as f32 / total as f32)
+                            })
                             .collect();
                         pi.join(" ")
                     } else {
@@ -117,7 +122,9 @@ fn main() {
                         let label = if side == w as usize { 1 } else { 0 };
                         let rem_plies = total_plies.saturating_sub(ply);
                         let final_delta = if side == 0 { d1 - d0 } else { d0 - d1 };
-                        batch.push(format!("{fen};{label};{ply};{rem_plies};{final_delta};{pi}"));
+                        batch.push(format!(
+                            "{fen};{label};{ply};{rem_plies};{final_delta};{pi}"
+                        ));
                     }
                     let _ = tx_clone.send(batch);
                 }
@@ -139,7 +146,11 @@ fn main() {
         let pct = (done as f64 / total_games as f64) * 100.0;
         print!(
             "\r  [İlerleme: {:>5}/{} | %{:<4.1} | {:<4.1} oyun/sn | Kalan: {:<4.1} dk]    ",
-            done, total_games, pct, gps, eta / 60.0
+            done,
+            total_games,
+            pct,
+            gps,
+            eta / 60.0
         );
         std::io::stdout().flush().ok();
     }
@@ -153,7 +164,9 @@ fn main() {
 
     println!(
         "\n✅ Self-Play Tamamlandı: {} oyun, {} satır veri üretildi ({:.1} sn, {:.1} oyun/sn).",
-        total_games, total_rows, total_sec, total_games as f64 / total_sec
+        total_games,
+        total_rows,
+        total_sec,
+        total_games as f64 / total_sec
     );
 }
-

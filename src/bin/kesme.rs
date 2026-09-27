@@ -1,4 +1,4 @@
-﻿//! "Yolumu kesebilecek KAÇ legal duvar var?"
+//! "Yolumu kesebilecek KAÇ legal duvar var?"
 //!
 //! a8h'nin sırrı bu: kendi duvarını, rakibin a8v koymak için ihtiyaç duyduğu
 //! **merkeze** koyuyor. İki duvar aynı merkezi paylaşamadığı için rakibin tek
@@ -16,7 +16,9 @@ use gedik::notation::{move_name, parse_move};
 fn kesiciler(p: &Position, side: usize) -> (u32, u32) {
     let opp = 1 - side;
     let m = p.masks();
-    let d0 = m.distance_to_row(p.pawn[side] as usize, goal_row(side)).unwrap_or(0);
+    let d0 = m
+        .distance_to_row(p.pawn[side] as usize, goal_row(side))
+        .unwrap_or(0);
     if p.walls[opp] == 0 {
         return (0, d0);
     }
@@ -28,11 +30,19 @@ fn kesiciler(p: &Position, side: usize) -> (u32, u32) {
                 continue;
             }
             let b = 1u64 << slot;
-            let nm = if horizontal { Masks::new(p.h | b, p.v) } else { Masks::new(p.h, p.v | b) };
-            let d = nm.distance_to_row(p.pawn[side] as usize, goal_row(side)).unwrap_or(d0);
+            let nm = if horizontal {
+                Masks::new(p.h | b, p.v)
+            } else {
+                Masks::new(p.h, p.v | b)
+            };
+            let d = nm
+                .distance_to_row(p.pawn[side] as usize, goal_row(side))
+                .unwrap_or(d0);
             if d > d0 {
                 adet += 1;
-                if d > en_kotu { en_kotu = d; }
+                if d > en_kotu {
+                    en_kotu = d;
+                }
             }
         }
     }
@@ -46,9 +56,15 @@ fn main() {
         pos.make(parse_move(&pos, t.trim()).expect(t));
     }
     let me = pos.side as usize;
-    println!("{:>6} {:>6} {:>10} {:>10}", "hamle", "yolum", "kesici", "en kotu");
+    println!(
+        "{:>6} {:>6} {:>10} {:>10}",
+        "hamle", "yolum", "kesici", "en kotu"
+    );
     for s in a[2].split(',').filter(|s| !s.trim().is_empty()) {
-        let Some(mv) = parse_move(&pos, s.trim()) else { println!("{s}: illegal"); continue };
+        let Some(mv) = parse_move(&pos, s.trim()) else {
+            println!("{s}: illegal");
+            continue;
+        };
         let mut q = pos;
         let _ = move_name(&pos, mv);
         q.make(mv);
@@ -60,8 +76,12 @@ fn main() {
     let t = std::time::Instant::now();
     let n = 20000;
     let mut acc = 0u32;
-    for _ in 0..n { acc = acc.wrapping_add(kesiciler(&pos, me).0); }
-    println!("\nhiz: {:.2} us/cagri  (acc {acc})", t.elapsed().as_secs_f64() * 1e6 / n as f64);
+    for _ in 0..n {
+        acc = acc.wrapping_add(kesiciler(&pos, me).0);
+    }
+    println!(
+        "\nhiz: {:.2} us/cagri  (acc {acc})",
+        t.elapsed().as_secs_f64() * 1e6 / n as f64
+    );
     let _ = (CELLS, WDIM, Move::hwall(0));
 }
-

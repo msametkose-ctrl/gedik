@@ -125,11 +125,7 @@ pub fn move_name(pos: &Position, mv: Move) -> String {
             let (fr, fc) = (from / N as i32, from % N as i32);
             let (tr, tc) = (to / N as i32, to % N as i32);
             // Satır/sütun kayması makul değilse (tahta dışı ya da sarma) yön adı.
-            if to < 0
-                || to >= CELLS as i32
-                || (tr - fr).abs() > 2
-                || (tc - fc).abs() > 2
-            {
+            if to < 0 || to >= CELLS as i32 || (tr - fr).abs() > 2 || (tc - fc).abs() > 2 {
                 PAWN_NAME[d].to_string()
             } else {
                 cell_name(to as usize)
@@ -219,9 +215,7 @@ pub fn board_string(pos: &Position) -> String {
 
     out.push_str(&format!(
         "\n  A (oyuncu 1) duvar: {}   B (oyuncu 2) duvar: {}   sıra: {}\n",
-        pos.walls[0],
-        pos.walls[1],
-        PIECE[pos.side as usize]
+        pos.walls[0], pos.walls[1], PIECE[pos.side as usize]
     ));
     out
 }

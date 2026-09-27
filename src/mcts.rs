@@ -316,7 +316,11 @@ impl Mcts {
     }
 
     /// Sabit rollout bütçesiyle arama.
-    pub fn search_rollouts(&mut self, pos: &Position, rollouts: u32) -> (Option<Move>, SearchStats) {
+    pub fn search_rollouts(
+        &mut self,
+        pos: &Position,
+        rollouts: u32,
+    ) -> (Option<Move>, SearchStats) {
         self.run(pos, rollouts, None)
     }
 
@@ -518,7 +522,15 @@ impl Mcts {
         });
         candidates.truncate(m);
 
-        let phases = if m > 8 { 4 } else if m > 4 { 3 } else if m > 2 { 2 } else { 1 };
+        let phases = if m > 8 {
+            4
+        } else if m > 4 {
+            3
+        } else if m > 2 {
+            2
+        } else {
+            1
+        };
         let mut done = 1u32;
 
         for phase in 0..phases {
@@ -550,8 +562,16 @@ impl Mcts {
             candidates.sort_by(|&a, &b| {
                 let na = self.nodes[(root.first_child as usize) + a];
                 let nb = self.nodes[(root.first_child as usize) + b];
-                let qa = if na.visits > 0 { na.value / na.visits as f32 } else { 0.5 };
-                let qb = if nb.visits > 0 { nb.value / nb.visits as f32 } else { 0.5 };
+                let qa = if na.visits > 0 {
+                    na.value / na.visits as f32
+                } else {
+                    0.5
+                };
+                let qb = if nb.visits > 0 {
+                    nb.value / nb.visits as f32
+                } else {
+                    0.5
+                };
                 let c_visit = 50.0f32;
                 let c_scale = 1.0f32;
                 let sigma_a = (c_visit + max_visits as f32) * c_scale * (qa - 0.5);
@@ -574,7 +594,11 @@ impl Mcts {
         let mut top: Vec<(Move, u32, f32)> = (0..root.n_children as usize)
             .map(|i| {
                 let n = self.nodes[(root.first_child as usize) + i];
-                let wr = if n.visits > 0 { n.value / n.visits as f32 } else { 0.0 };
+                let wr = if n.visits > 0 {
+                    n.value / n.visits as f32
+                } else {
+                    0.0
+                };
                 (n.mv, n.visits, wr)
             })
             .collect();
@@ -628,9 +652,11 @@ impl Mcts {
                     break;
                 }
                 let priors = if self.use_priors {
-                    let ag_politika = self.policy_mode > 0 && self.ag().is_some_and(|n| n.has_policy());
+                    let ag_politika =
+                        self.policy_mode > 0 && self.ag().is_some_and(|n| n.has_policy());
                     let ham = if ag_politika {
-                        self.ag().and_then(|n| n.policy(&pos, &moves, &mut self.nn_scratch))
+                        self.ag()
+                            .and_then(|n| n.policy(&pos, &moves, &mut self.nn_scratch))
                     } else {
                         None
                     };
@@ -650,7 +676,11 @@ impl Mcts {
                         let pb = (!moves[b].is_wall(), priors[b]);
                         pb.0.cmp(&pa.0).then_with(|| pb.1.total_cmp(&pa.1))
                     });
-                    moves = idx_arr.into_iter().take(self.max_children).map(|i| moves[i]).collect();
+                    moves = idx_arr
+                        .into_iter()
+                        .take(self.max_children)
+                        .map(|i| moves[i])
+                        .collect();
                 }
 
                 let first_child = self.nodes.len() as u32;
@@ -884,8 +914,7 @@ impl Mcts {
                 break;
             }
             let first = p.first_child as usize;
-            let all_lost = (0..p.n_children as usize)
-                .all(|i| self.nodes[first + i].proof == 1);
+            let all_lost = (0..p.n_children as usize).all(|i| self.nodes[first + i].proof == 1);
             if all_lost {
                 self.nodes[parent].proof = -1;
             } else {
@@ -1158,9 +1187,7 @@ pub fn search_parallel(
 
     let mut top: Vec<(Move, u32, f32)> = agg
         .iter()
-        .map(|(&id, &(v, val, _))| {
-            (Move(id), v, if v > 0 { val / v as f32 } else { 0.0 })
-        })
+        .map(|(&id, &(v, val, _))| (Move(id), v, if v > 0 { val / v as f32 } else { 0.0 }))
         .collect();
     top.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.total_cmp(&a.2)));
 
