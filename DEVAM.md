@@ -32,7 +32,7 @@ güç** önemli. Her ölçüm bu senaryoya göre yapılmalı (kısa denemeler i�
 | Hamleler arası ağaç yeniden kullanımı (`ru=1`, varsayılan açık; web sunucusu motoru önbellekte tutuyor) | 400 ms'de 29-18 |
 | Damıtma: ResNet öğretmen → MLP öğrenci (329→128→32→1). Yeni `ag.bin` bu öğrenci, eski MLP `ag_mlp.bin` | Eski MLP'ye karşı 400 ms'de 55-36 (%60, ≈+74 Elo) |
 | `gedik.bat`: dalı `%USERPROFILE%\gedik-guncel` klasörüne çekip derler ve web arayüzünü açar | — |
-| Final kontrol: yeni varsayılan, eski varsayılana (ResNet, ağaç yeniden kullanımı kapalı) karşı, 2,5 sn, tüm çekirdekler | 13 oyun sonunda 9-4 önde (maç bittiğinde güncellenecek) |
+| Final kontrol: yeni varsayılan, eski varsayılana (ResNet, ağaç yeniden kullanımı kapalı) karşı, 2,5 sn, tüm çekirdekler | **10-6 (%62,5)**. 16 oyunluk %95 aralığı %39-86, yani %50'yi dışlamıyor: yön olumlu, ama kesin kanıt değil. Laptopta 100+ oyunla doğrula |
 
 Önemli bulgular:
 - ResNet (QNN3, 32 kanal × 4 blok) düğüm başına çok daha akıllı. Eşit
