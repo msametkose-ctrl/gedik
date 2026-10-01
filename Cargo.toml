@@ -32,6 +32,10 @@ path = "src/bin/uret.rs"
 name = "kodla"          # CSV -> egitime hazir ikili
 path = "src/bin/kodla.rs"
 
+[[bin]]
+name = "damit"          # ResNet ogretmenle etiketli self-play (damitma verisi)
+path = "src/bin/damit.rs"
+
 # --- teshis --------------------------------------------------------------
 [[bin]]
 name = "analiz"         # bir hamle listesini oynatip motorun degerlendirmesini basar

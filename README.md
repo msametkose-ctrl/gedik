@@ -63,7 +63,8 @@ Every command takes an engine spec:
 Keys: `cp` c_puct · `fpu` first-play urgency · `et` expand threshold ·
 `mn` node cap · `mc` max children · `noise` root noise · `t` threads ·
 `nn` network on/off · `pol` learned move ordering · `pt` its temperature ·
-`sq` non-saturating value · `pr` priors · `sv` solver.
+`sq` non-saturating value · `pr` priors · `sv` solver · `ru` tree reuse
+between moves (on by default) · `ag` network file, e.g. `ag=ag_resnet.bin`.
 
 ---
 
@@ -79,6 +80,22 @@ Wilson 95% interval.
 | PUCT with policy priors instead of plain UCT | 80.0% | +241 |
 | fitted linear weights instead of hand-written | 149–32 | **+267** |
 | neural evaluation instead of linear | 473–104 | **+263** |
+| reuse the tree between moves (400 ms/move) | 29–18 | +83, borderline |
+
+### The ResNet, and why it is not the default
+
+`ag_resnet.bin` is a 32-channel, 4-block spatial ResNet. Per node it is the
+better evaluator, but it costs ~430 µs per position against ~2 µs for the
+MLP, so at a real time control it searches far less:
+
+| match | result | Elo |
+|---|---|---|
+| ResNet vs MLP, 3000 iterations each | 34–14 | +154 |
+| ResNet vs MLP, 400 ms/move, 1 thread | 16–32 | −120 |
+| ResNet vs MLP, 2.5 s/move, all cores | 4–9 (13 games) | about −140 |
+
+It stays in the repository as the teacher of the fast network (see
+*Distillation* below) and for anyone who wants to try it: `ag=ag_resnet.bin`.
 
 Search scaling, measured on the same machine:
 
@@ -189,6 +206,29 @@ forward passes were checked against each other and agree to 1.2 × 10⁻⁷.
 
 `tools/fit_np.py` fits the 12-feature linear model instead, if you want the
 dependency-free evaluation.
+
+### Distillation: the ResNet's judgement at the MLP's speed
+
+`damit` plays fast self-play games and labels every position with the
+ResNet's value, mixed with the game result
+(`y = λ·teacher + (1−λ)·result`). `tools/egit_np.py` trains the MLP on
+those soft labels with numpy only — no PyTorch needed.
+
+```sh
+./target/release/damit 28000 300 4 data/damit.csv 0.8 ag_resnet.bin
+./target/release/kodla data/damit.csv data/damit.bin
+python tools/egit_np.py data/damit.bin ag_student.bin --h1 128 --epoch 16 --lr 2e-3
+./target/release/gedik match "mcts:400ms:ag=ag_student.bin" "mcts:400ms" 12 42 6
+```
+
+The numpy forward pass agrees with the Rust one to 5 × 10⁻⁷.
+
+The shipped `ag.bin` is such a student: 1.56M positions from 28 000 games,
+λ = 0.8, 329 → 128 → 32 → 1, trained from scratch. Against the previous
+MLP (kept as `ag_mlp.bin`) at 400 ms/move it scored 24–20 and 31–16 on two
+sets of openings, 55–36 together (60%, about +74 Elo, 95% interval
+50–70%). It searches at the same speed: the hidden layer is not where the
+time goes.
 
 ---
 
