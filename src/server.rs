@@ -24,6 +24,7 @@ use crate::notation::{from_fen, move_name, parse_move, to_fen};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::thread;
 use std::time::Instant;
 
@@ -33,6 +34,13 @@ const UI: &str = include_str!("ui.html");
 /// öncelikli.
 const BUILTIN_RATINGS: &str = include_str!("ratings_builtin.json");
 static SEED: AtomicU64 = AtomicU64::new(0x9e37_79b9_7f4a_7c15);
+
+/// Son kullanılan motor, tanımıyla birlikte. Her istekte yeni motor kurmak
+/// önceki aramanın ağacını çöpe atıyordu; aynı tanımla gelen bir sonraki
+/// istek bu motoru alıyor ve `Mcts::reuse_for` sayesinde oynanan dalın alt
+/// ağacından devam ediyor. Pozisyon o ağaçta yoksa (yeni oyun, geri alma)
+/// arama kendiliğinden sıfırdan başlıyor.
+static ENGINE_CACHE: Mutex<Option<(String, Engine)>> = Mutex::new(None);
 
 pub fn serve(port: u16) -> std::io::Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", port))?;
@@ -330,8 +338,12 @@ fn api_bot(query: &str) -> Result<String, String> {
         return Err("oyun bitmiş".into());
     }
     let spec = param(query, "engine").unwrap_or_else(|| "mcts:1000ms".into());
-    let seed = SEED.fetch_add(0x9e37_79b9_7f4a_7c15, Ordering::Relaxed) | 1;
-    let mut engine = Engine::parse(&spec, seed);
+    let mut cache = ENGINE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if !matches!(&*cache, Some((s, _)) if *s == spec) {
+        let seed = SEED.fetch_add(0x9e37_79b9_7f4a_7c15, Ordering::Relaxed) | 1;
+        *cache = Some((spec.clone(), Engine::parse(&spec, seed)));
+    }
+    let engine = &mut cache.as_mut().expect("motor az once kuruldu").1;
 
     let hist_param = param(query, "history").unwrap_or_default();
     let mut history_hashes = Vec::new();

@@ -706,3 +706,58 @@ fn test_shortest_path_mask_validity() {
     assert!(mask0 & (1u128 << 76) != 0, "Başlangıç piyon hücresi en kısa yolda yer almalı");
 }
 
+
+#[test]
+fn reuse_for_continues_from_our_move_and_their_reply() {
+    let pos = Position::start();
+    // Aynı tohum, aynı arama: değer yaprağı deterministik, iki ağaç birebir aynı.
+    let mut a = Mcts::new(0x5151);
+    let mut b = Mcts::new(0x5151);
+    let (mv, _) = a.search_rollouts(&pos, 5000);
+    let _ = b.search_rollouts(&pos, 5000);
+    let mine = mv.expect("hamle dönmeli");
+
+    // Rakibin ağaçta en çok baktığı cevabı ikinci ağaçtan öğren.
+    assert!(b.advance_tree(&pos, mine));
+    let reply = b
+        .root_moves()
+        .into_iter()
+        .max_by_key(|r| r.visits)
+        .expect("cevap olmalı")
+        .mv;
+
+    let mut next = pos;
+    next.make(mine);
+    next.make(reply);
+    assert!(a.reuse_for(&next), "torun ağaçta olmalı");
+    let kept: u32 = a.root_moves().iter().map(|r| r.visits).sum();
+    assert!(kept > 0, "yeniden kullanılan ağaçta ziyaret kalmalı");
+    let (mv2, _) = a.search_rollouts(&next, 500);
+    assert!(next.is_legal(mv2.expect("hamle dönmeli")));
+
+    // Ağaçta olmayan pozisyon hazırlanamaz; arama yine de sıfırdan çalışır.
+    let mut rng = Rng(0x7777_1111_2222_3333);
+    let other = random_position(&mut rng, 12);
+    if other.winner().is_none() && other.hash != next.hash {
+        assert!(!a.reuse_for(&other));
+        let (mv3, _) = a.search_rollouts(&other, 300);
+        assert!(other.is_legal(mv3.expect("hamle dönmeli")));
+    }
+}
+
+#[test]
+fn engine_reuses_trees_across_moves_and_stays_legal() {
+    use gedik::engine::Engine;
+    for spec in ["mcts:1500", "mcts:3000:t=2", "mcts:1500:ru=0"] {
+        let mut e = Engine::parse(spec, 9);
+        let mut pos = Position::start();
+        for _ in 0..12 {
+            if pos.winner().is_some() {
+                break;
+            }
+            let mv = e.choose(&pos).mv.expect("hamle dönmeli");
+            assert!(pos.is_legal(mv), "{spec}: illegal hamle {mv:?}");
+            pos.make(mv);
+        }
+    }
+}

@@ -16,7 +16,7 @@
 //! | `ab:500ms` | baseline alpha-beta |
 
 use crate::board::Position;
-use crate::mcts::{search_parallel, Config, Leaf, Mcts};
+use crate::mcts::{search_parallel_with, Config, Leaf, Mcts};
 use crate::moves::Move;
 use crate::search::Searcher;
 
@@ -29,6 +29,11 @@ pub enum Engine {
         threads: usize,
         seed: u64,
         label: String,
+        /// Thread başına bir ağaç; hamleler arasında saklanıyor ki bir
+        /// sonraki aramada `Mcts::reuse_for` ile alt ağaç devam ettirilsin.
+        trees: Vec<Mcts>,
+        /// Ağaç yeniden kullanımı açık mı (`ru=0` kapatır, ölçüm için).
+        reuse: bool,
     },
     AlphaBeta(Searcher, u64),
 }
@@ -79,6 +84,7 @@ impl Engine {
                     cfg.weights = crate::heuristics::WEIGHTS_HAND;
                 }
                 let mut threads = 1usize;
+                let mut reuse = true;
 
                 // Üçüncü alan: ya tek sayı (c_puct) ya da `anahtar=değer` listesi.
                 // Örn. `mcts:20000:cp=1.4,et=8,t=4`
@@ -119,6 +125,7 @@ impl Engine {
                                 "pol" | "policy" => cfg.policy_mode = x as u8,
                                 "pt" | "poltemp" => cfg.policy_temp = x,
                                 "guard" | "gd" => cfg.use_guard = x != 0.0,
+                                "ru" | "reuse" => reuse = x != 0.0,
                                 "endgame" | "eg" => cfg.use_endgame_solver = x != 0.0,
                                 // w=0 elle tasarlanmış (varsayılan), w=1 öğrenilmiş
                                 "w" | "weights" => {
@@ -152,6 +159,8 @@ impl Engine {
                     threads,
                     seed,
                     label: spec.trim().to_string(),
+                    trees: Vec::new(),
+                    reuse,
                 }
             }
         }
@@ -182,25 +191,36 @@ impl Engine {
                 iters,
                 threads,
                 seed,
+                trees,
+                reuse,
                 ..
             } => {
                 let c = *cfg;
                 let sd = *seed;
-                let (mv, st) = if *threads > 1 {
-                    search_parallel(pos, *ms, *iters, *threads, move |m, t| {
-                        c.apply(m);
-                        m.history = history.to_vec();
-                        m.reseed(sd.wrapping_mul(0x9e37_79b9).wrapping_add(t as u64 * 7 + 1));
-                    })
+                let n = (*threads).max(1);
+                // Ağaçları sakla: pozisyon önceki kökün kendisi, çocuğu ya da
+                // torunuysa arama o alt ağaçtan devam ediyor. Değilse `run`
+                // hash uyuşmazlığını görüp sıfırdan kuruyor.
+                if !*reuse || trees.len() != n {
+                    *trees = (0..n)
+                        .map(|t| {
+                            Mcts::new(
+                                sd.wrapping_mul(0x9e37_79b9_7f4a_7c15)
+                                    .wrapping_add(t as u64 * 7 + 1)
+                                    | 1,
+                            )
+                        })
+                        .collect();
                 } else {
-                    let mut m = Mcts::new(sd);
-                    c.apply(&mut m);
-                    m.history = history.to_vec();
-                    match ms {
-                        Some(v) => m.search_time(pos, *v),
-                        None => m.search_rollouts(pos, *iters),
+                    for m in trees.iter_mut() {
+                        m.reuse_for(pos);
                     }
-                };
+                }
+                let (mv, st) = search_parallel_with(pos, *ms, *iters, trees, move |m, t| {
+                    c.apply(m);
+                    m.history = history.to_vec();
+                    m.reseed(sd.wrapping_mul(0x9e37_79b9).wrapping_add(t as u64 * 7 + 1));
+                });
                 Choice {
                     mv,
                     info: format!("wr {:.3}", st.win_rate),

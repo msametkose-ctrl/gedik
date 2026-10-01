@@ -111,6 +111,9 @@ pub struct Mcts {
     pub root_noise: f32,
     /// Ağacın kökünün Zobrist hash'i (ağaç yeniden kullanımını güvenle doğrulamak için).
     pub root_hash: u64,
+    /// Ağacın kök pozisyonu. `reuse_for` iki yarım hamle aşağıdaki torunu
+    /// bulmak için hamleleri buradan oynatıyor.
+    root_pos: Option<Position>,
     /// MCTS Transposition Table: aynı pozisyona varan dallar için değer ve kanıt önbelleği.
     pub tt: MctsTt,
     /// Oyun geçmişindeki son pozisyonların hash'leri (mekik / sonsuz tekrarı önlemek için).
@@ -224,6 +227,7 @@ impl Mcts {
             weights: VALUE_WEIGHTS,
             root_noise: 0.0,
             root_hash: 0,
+            root_pos: None,
             tt: MctsTt::new(18),
             history: Vec::new(),
             use_gumbel: false,
@@ -240,6 +244,7 @@ impl Mcts {
     pub fn reset(&mut self) {
         self.nodes.clear();
         self.root_hash = 0;
+        self.root_pos = None;
         self.tt.clear();
     }
 
@@ -312,7 +317,45 @@ impl Mcts {
         let mut next_pos = *pos;
         next_pos.make(mv);
         self.root_hash = next_pos.hash;
+        self.root_pos = Some(next_pos);
         true
+    }
+
+    /// Önceki aramanın ağacını `pos` için hazırlar: `pos` kökün kendisi, bir
+    /// çocuğu ya da bir torunuysa (bizim hamlemiz + rakibin cevabı) o alt
+    /// ağaç yeni kök olur ve arama oradan devam eder. Bulunamazsa `false`;
+    /// `run` hash uyuşmadığı için ağacı zaten sıfırdan kurar.
+    ///
+    /// Neden: sabit süreli oyunda her hamle sıfırdan başlıyordu. Rakip
+    /// beklenen cevabı verdiyse o dalda biriken ziyaretler bedava süre.
+    pub fn reuse_for(&mut self, pos: &Position) -> bool {
+        let Some(root) = self.root_pos else {
+            return false;
+        };
+        if self.nodes.is_empty() || root.hash != self.root_hash {
+            return false;
+        }
+        if root.hash == pos.hash {
+            return true;
+        }
+        let r = self.nodes[0];
+        for i in 0..r.n_children as usize {
+            let c = self.nodes[r.first_child as usize + i];
+            let mut p1 = root;
+            p1.make(c.mv);
+            if p1.hash == pos.hash {
+                return self.advance_tree(&root, c.mv);
+            }
+            for j in 0..c.n_children as usize {
+                let g = self.nodes[c.first_child as usize + j];
+                let mut p2 = p1;
+                p2.make(g.mv);
+                if p2.hash == pos.hash {
+                    return self.advance_tree(&root, c.mv) && self.advance_tree(&p1, g.mv);
+                }
+            }
+        }
+        false
     }
 
     /// Sabit rollout bütçesiyle arama.
@@ -337,6 +380,21 @@ impl Mcts {
 
         let start = Instant::now();
         let reuse = !self.nodes.is_empty() && self.root_hash == pos.hash;
+        self.root_pos = Some(*pos);
+
+        // Süreli aramada ağaç milyonlarca düğüme büyüyor; Vec ikiye katlanarak
+        // büyürken her seferinde bütün ağacı kopyalıyordu (6M düğümde toplam
+        // ~290 MB). Çok thread'de bu kopyalar bellek bant genişliğini
+        // paylaşıyor. Ayrılan sanal bellek dokunulana kadar fiziksel belleğe
+        // dönüşmediği için baştan ayırmak ucuz.
+        let want = if budget.is_some() {
+            self.max_nodes
+        } else {
+            (max_rollouts as usize).saturating_mul(40).min(self.max_nodes)
+        };
+        if self.nodes.capacity() < want {
+            self.nodes.reserve(want - self.nodes.len());
+        }
 
         if !reuse {
             self.nodes.clear();
@@ -465,6 +523,7 @@ impl Mcts {
         let start = Instant::now();
         self.nodes.clear();
         self.root_hash = pos.hash;
+        self.root_pos = Some(*pos);
         self.nodes.push(Node {
             mv: Move(0),
             first_child: 0,
@@ -1107,9 +1166,31 @@ pub fn search_parallel(
     configure: impl Fn(&mut Mcts, usize) + Send + Sync + Copy,
 ) -> (Option<Move>, SearchStats) {
     let threads = threads.max(1);
+    let mut trees: Vec<Mcts> = if threads == 1 {
+        vec![Mcts::new(0x9e37_79b9)]
+    } else {
+        (0..threads)
+            .map(|t| Mcts::new(0x9e37_79b9_7f4a_7c15u64.wrapping_mul(t as u64 + 1) | 1))
+            .collect()
+    };
+    search_parallel_with(pos, budget_ms, iters, &mut trees, configure)
+}
+
+/// `search_parallel`in ağaçları dışarıdan alan hâli: thread başına bir ağaç.
+/// Ağaçlar aramadan sonra çağırana geri kalıyor, böylece bir sonraki hamlede
+/// `Mcts::reuse_for` ile yeniden kullanılabiliyorlar.
+pub fn search_parallel_with(
+    pos: &Position,
+    budget_ms: Option<u64>,
+    iters: u32,
+    trees: &mut [Mcts],
+    configure: impl Fn(&mut Mcts, usize) + Send + Sync + Copy,
+) -> (Option<Move>, SearchStats) {
+    let threads = trees.len();
+    assert!(threads > 0, "en az bir agac gerekli");
     if threads == 1 {
-        let mut m = Mcts::new(0x9e37_79b9);
-        configure(&mut m, 0);
+        let m = &mut trees[0];
+        configure(m, 0);
         return match budget_ms {
             Some(ms) => m.search_time(pos, ms),
             None => m.search_rollouts(pos, iters),
@@ -1118,12 +1199,13 @@ pub fn search_parallel(
 
     let start = Instant::now();
     let results: Vec<(Vec<RootMove>, u32, usize)> = std::thread::scope(|s| {
-        let handles: Vec<_> = (0..threads)
-            .map(|t| {
+        let handles: Vec<_> = trees
+            .iter_mut()
+            .enumerate()
+            .map(|(t, m)| {
                 let p = *pos;
                 s.spawn(move || {
-                    let mut m = Mcts::new(0x9e37_79b9_7f4a_7c15u64.wrapping_mul(t as u64 + 1) | 1);
-                    configure(&mut m, t);
+                    configure(m, t);
                     m.root_noise = m.root_noise.max(0.08);
                     let (_, st) = match budget_ms {
                         Some(ms) => m.search_time(&p, ms),
