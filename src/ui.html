@@ -229,15 +229,22 @@
 <script>
 const N = 9, WD = 8;
 let CORES = 1;
-const ENGINES = [
-  ["mcts:2500",        "Kolay — 2 500 iterasyon"],
-  ["mcts:20000",       "Orta — 20 000 iterasyon"],
-  ["mcts:60000",       "Zor — 60 000 iterasyon"],
-  ["mcts:300000:t=0",  "Güçlü — 300 000 iterasyon"],
-  ["mcts:1000ms:t=0",  "Usta — 1.0 saniye (Çok Çekirdek)"],
-  ["mcts:2000ms:t=0",  "Büyükusta — 2.0 saniye (Çok Çekirdek)"],
-  ["mcts:1000000:t=0", "Maksimum — 1 000 000 iterasyon"],
-];
+// Hepsi tüm çekirdekleri kullanır (t=0, kök paralelliği: çekirdek başına
+// ayrı ağaç). Sabit iterasyonlu kolay seviyelerde toplam iterasyon ağaçlara
+// bölündüğü için sayı çekirdek sayısıyla çarpılır; her ağaç eskisi kadar
+// düşünür, seviyeler birbirine göre yerini korur, cevap anında gelir.
+let ENGINES = [];
+function buildEngines() {
+  const c = Math.max(1, CORES);
+  ENGINES = [
+    [`mcts:${2500 * c}:t=0`,  "Kolay — 2 500 iterasyon / çekirdek"],
+    [`mcts:${20000 * c}:t=0`, "Orta — 20 000 iterasyon / çekirdek"],
+    [`mcts:${60000 * c}:t=0`, "Zor — 60 000 iterasyon / çekirdek (~0.6 sn)"],
+    ["mcts:1000ms:t=0",  "Usta — 1 saniye"],
+    ["mcts:2000ms:t=0",  "Büyükusta — 2 saniye"],
+    ["mcts:3000ms:t=0",  "Maksimum — 3 saniye"],
+  ];
+}
 
 // Sayfa URL'inde ?fen=... varsa oradan başla — pozisyon paylaşmayı ve
 // belirli bir pozisyonu tekrar tekrar test etmeyi kolaylaştırıyor.
@@ -497,15 +504,18 @@ function showError(e) {
 
 // -------------------------------------------------- kontroller
 function fillEngines() {
+  buildEngines();
   for (const sel of [$("engA"), $("engB")]) {
+    sel.innerHTML = "";
     for (const [v, label] of ENGINES) {
       const o = document.createElement("option");
       o.value = v; o.textContent = label;
       sel.appendChild(o);
     }
   }
-  $("engA").value = "mcts:300000:t=0";
-  $("engB").value = "mcts:300000:t=0";
+  for (const sel of [$("engA"), $("engB")]) {
+    sel.value = "mcts:2000ms:t=0";
+  }
 }
 
 async function newGame() {
@@ -729,7 +739,7 @@ async function loadRatings() {
 
 fillEngines();
 build();
-loadCores().then(loadRatings).catch(() => {});
+loadCores().then(fillEngines).then(loadRatings).catch(() => {});
 deneyIzle();
 newGame().catch(showError);
 </script>
