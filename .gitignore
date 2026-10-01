@@ -10,3 +10,4 @@
 ratings.json
 __pycache__/
 *.pyc
+!ag_resnet.bin
