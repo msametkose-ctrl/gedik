@@ -359,7 +359,11 @@ impl Mcts {
     }
 
     /// Sabit rollout bütçesiyle arama.
-    pub fn search_rollouts(&mut self, pos: &Position, rollouts: u32) -> (Option<Move>, SearchStats) {
+    pub fn search_rollouts(
+        &mut self,
+        pos: &Position,
+        rollouts: u32,
+    ) -> (Option<Move>, SearchStats) {
         self.run(pos, rollouts, None)
     }
 
@@ -390,7 +394,9 @@ impl Mcts {
         let want = if budget.is_some() {
             self.max_nodes
         } else {
-            (max_rollouts as usize).saturating_mul(40).min(self.max_nodes)
+            (max_rollouts as usize)
+                .saturating_mul(40)
+                .min(self.max_nodes)
         };
         if self.nodes.capacity() < want {
             self.nodes.reserve(want - self.nodes.len());
@@ -577,7 +583,15 @@ impl Mcts {
         });
         candidates.truncate(m);
 
-        let phases = if m > 8 { 4 } else if m > 4 { 3 } else if m > 2 { 2 } else { 1 };
+        let phases = if m > 8 {
+            4
+        } else if m > 4 {
+            3
+        } else if m > 2 {
+            2
+        } else {
+            1
+        };
         let mut done = 1u32;
 
         for phase in 0..phases {
@@ -585,15 +599,19 @@ impl Mcts {
                 break;
             }
             let phase_budget = (max_rollouts / (candidates.len() as u32 * phases as u32)).max(1);
-
-            for &cand_idx in &candidates {
-                let child_node_idx = (root.first_child as usize) + cand_idx;
-                for _ in 0..phase_budget {
-                    if let Some(b) = budget {
-                        if done % 128 == 0 && start.elapsed() >= b {
-                            break;
-                        }
+            // Süreli aramada max_rollouts = u32::MAX olduğundan eskiden ilk
+            // aday bütün süreyi yiyordu, diğerleri ~0 ziyaretle eleniyordu
+            // (400 ms'de PUCT'a 0-32). Şimdi süre aşamalara eşit bölünüyor ve
+            // adaylar sırayla birer iterasyon alıyor.
+            let deadline = budget.map(|b| b.mul_f64((phase + 1) as f64 / phases as f64));
+            'tur: for _ in 0..phase_budget {
+                if let Some(d) = deadline {
+                    if start.elapsed() >= d {
+                        break 'tur;
                     }
+                }
+                for &cand_idx in &candidates {
+                    let child_node_idx = (root.first_child as usize) + cand_idx;
                     self.iterate_forced(pos, child_node_idx);
                     done += 1;
                 }
@@ -609,8 +627,16 @@ impl Mcts {
             candidates.sort_by(|&a, &b| {
                 let na = self.nodes[(root.first_child as usize) + a];
                 let nb = self.nodes[(root.first_child as usize) + b];
-                let qa = if na.visits > 0 { na.value / na.visits as f32 } else { 0.5 };
-                let qb = if nb.visits > 0 { nb.value / nb.visits as f32 } else { 0.5 };
+                let qa = if na.visits > 0 {
+                    na.value / na.visits as f32
+                } else {
+                    0.5
+                };
+                let qb = if nb.visits > 0 {
+                    nb.value / nb.visits as f32
+                } else {
+                    0.5
+                };
                 let c_visit = 50.0f32;
                 let c_scale = 1.0f32;
                 let sigma_a = (c_visit + max_visits as f32) * c_scale * (qa - 0.5);
@@ -633,7 +659,11 @@ impl Mcts {
         let mut top: Vec<(Move, u32, f32)> = (0..root.n_children as usize)
             .map(|i| {
                 let n = self.nodes[(root.first_child as usize) + i];
-                let wr = if n.visits > 0 { n.value / n.visits as f32 } else { 0.0 };
+                let wr = if n.visits > 0 {
+                    n.value / n.visits as f32
+                } else {
+                    0.0
+                };
                 (n.mv, n.visits, wr)
             })
             .collect();
@@ -661,89 +691,20 @@ impl Mcts {
         (best_mv, stats)
     }
 
+    /// Gumbel kökü: ilk adımı `child_idx` çocuğuna zorla, gerisi normal
+    /// iterasyon. Eskiden burada `iterate`'in ayrı bir kopyası vardı; kopya
+    /// geride kalmıştı (çocuk `side`'ı yanlış, kırpılan hamlelerle öncelikler
+    /// kayık, kazanılmış pozisyon terminal sayılmıyordu). Gumbel'in PUCT'a
+    /// 5-75 kaybetmesinin bir kısmı buydu.
     fn iterate_forced(&mut self, root_pos: &Position, child_idx: usize) {
-        let mut pos = *root_pos;
-        self.path.clear();
-        self.path.push(0);
-        self.path.push(child_idx as u32);
-        let mv = self.nodes[child_idx].mv;
-        pos.make(mv);
-
-        let mut idx = child_idx;
-        loop {
-            if self.nodes[idx].terminal {
-                break;
-            }
-            if self.nodes[idx].n_children == 0 {
-                if self.nodes[idx].visits < self.expand_threshold {
-                    break;
-                }
-                if self.nodes.len() >= self.max_nodes {
-                    break;
-                }
-                let moves = candidate_moves_filtered(&pos, self.filter_walls);
-                if moves.is_empty() {
-                    self.nodes[idx].terminal = true;
-                    break;
-                }
-                let priors = if self.use_priors {
-                    let ag_politika = self.policy_mode > 0 && self.ag().is_some_and(|n| n.has_policy());
-                    let ham = if ag_politika {
-                        self.ag().and_then(|n| n.policy(&pos, &moves, &mut self.nn_scratch))
-                    } else {
-                        None
-                    };
-                    match ham {
-                        Some(logits) => softmax(&logits, self.policy_temp),
-                        None => move_priors(&pos, &moves),
-                    }
-                } else {
-                    vec![1.0 / moves.len() as f32; moves.len()]
-                };
-
-                let mut moves = moves;
-                if moves.len() > self.max_children {
-                    let mut idx_arr: Vec<usize> = (0..moves.len()).collect();
-                    idx_arr.sort_by(|&a, &b| {
-                        let pa = (!moves[a].is_wall(), priors[a]);
-                        let pb = (!moves[b].is_wall(), priors[b]);
-                        pb.0.cmp(&pa.0).then_with(|| pb.1.total_cmp(&pa.1))
-                    });
-                    moves = idx_arr.into_iter().take(self.max_children).map(|i| moves[i]).collect();
-                }
-
-                let first_child = self.nodes.len() as u32;
-                let n_children = moves.len() as u16;
-                let side = pos.side;
-                for (m, pr) in moves.into_iter().zip(priors) {
-                    self.nodes.push(Node {
-                        mv: m,
-                        first_child: 0,
-                        n_children: 0,
-                        side,
-                        terminal: false,
-                        visits: 0,
-                        value: 0.0,
-                        prior: pr,
-                        proof: 0,
-                    });
-                }
-                self.nodes[idx].first_child = first_child;
-                self.nodes[idx].n_children = n_children;
-                break;
-            }
-
-            let best_child = self.select_child(idx);
-            self.path.push(best_child as u32);
-            let mv = self.nodes[best_child].mv;
-            pos.make(mv);
-            idx = best_child;
-        }
-
-        self.eval_and_backprop(&pos, idx);
+        self.iterate_from(root_pos, Some(child_idx));
     }
 
     fn iterate(&mut self, root_pos: &Position) {
+        self.iterate_from(root_pos, None);
+    }
+
+    fn iterate_from(&mut self, root_pos: &Position, forced: Option<usize>) {
         let mut pos = *root_pos;
         self.path.clear();
         self.path.push(0);
@@ -837,7 +798,10 @@ impl Mcts {
                 self.nodes[idx].n_children = moves.len() as u16;
             }
 
-            let ci = self.select_child(idx);
+            let ci = match forced {
+                Some(c) if idx == 0 => c,
+                _ => self.select_child(idx),
+            };
             pos.make(self.nodes[ci].mv);
             self.path.push(ci as u32);
             idx = ci;
@@ -943,8 +907,7 @@ impl Mcts {
                 break;
             }
             let first = p.first_child as usize;
-            let all_lost = (0..p.n_children as usize)
-                .all(|i| self.nodes[first + i].proof == 1);
+            let all_lost = (0..p.n_children as usize).all(|i| self.nodes[first + i].proof == 1);
             if all_lost {
                 self.nodes[parent].proof = -1;
             } else {
@@ -1240,9 +1203,7 @@ pub fn search_parallel_with(
 
     let mut top: Vec<(Move, u32, f32)> = agg
         .iter()
-        .map(|(&id, &(v, val, _))| {
-            (Move(id), v, if v > 0 { val / v as f32 } else { 0.0 })
-        })
+        .map(|(&id, &(v, val, _))| (Move(id), v, if v > 0 { val / v as f32 } else { 0.0 }))
         .collect();
     top.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.total_cmp(&a.2)));
 
