@@ -32,7 +32,7 @@ güç** önemli. Her ölçüm bu senaryoya göre yapılmalı (kısa denemeler i�
 | Hamleler arası ağaç yeniden kullanımı (`ru=1`, varsayılan açık; web sunucusu motoru önbellekte tutuyor) | 400 ms'de 29-18 |
 | Damıtma: ResNet öğretmen → MLP öğrenci (329→128→32→1). Yeni `ag.bin` bu öğrenci, eski MLP `ag_mlp.bin` | Eski MLP'ye karşı 400 ms'de 55-36 (%60, ≈+74 Elo) |
 | `gedik.bat`: dalı `%USERPROFILE%\gedik-guncel` klasörüne çekip derler ve web arayüzünü açar | — |
-| Final kontrol: yeni varsayılan, eski varsayılana (ResNet, ağaç yeniden kullanımı kapalı) karşı, 2,5 sn, tüm çekirdekler | **10-6 (%62,5)**. 16 oyunluk %95 aralığı %39-86, yani %50'yi dışlamıyor: yön olumlu, ama kesin kanıt değil. Laptopta 100+ oyunla doğrula |
+| Final kontrol: yeni varsayılan, eski varsayılana (ResNet, ağaç yeniden kullanımı kapalı) karşı, 2,5 sn, tüm çekirdekler | Bulut 10-6, laptop 28-21 (1 bitmedi). **Toplam 38-27 (%58,5, ≈+59 Elo)**, Wilson %46-70. Yön tutarlı, ama aralık hâlâ %50'yi kesiyor; kullanıcı isteğiyle 65 oyunda durduruldu |
 
 Önemli bulgular:
 - ResNet (QNN3, 32 kanal × 4 blok) düğüm başına çok daha akıllı. Eşit
@@ -44,6 +44,23 @@ güç** önemli. Her ölçüm bu senaryoya göre yapılmalı (kısa denemeler i�
 - Guard açık/kapalı farksız (40-38). ResNet politikası pol=2, pol=0'ı
   29-19 yeniyor.
 - 6M düğüm sınırına ~190 bin iterasyonda ulaşılıyor.
+
+## Laptop oturumu (2 Ekim 2026)
+
+| Değişiklik | Ölçüm | Commit |
+|---|---|---|
+| `tools/sprt.py`: paralel parçalı SPRT (elo0=0, elo1=+20), açılış çifti varyansı + 4 sözde çift, kesilen maçı dosyalardan sürdürme | — | `6b31f69`, `cb79a71`, `6832ad7` |
+| Damıtılmış `ag.bin`, eski MLP'ye karşı, 400 ms | **70-32 (%68,6)**, Wilson %59-77, H1 kabul | — |
+| Gumbel: `iterate_forced` kopyası kaldırıldı (side, prior hizası, terminal), süre aşamalara bölündü | PUCT'a karşı 0-32 → 12-41 (%22,6). Hâlâ zayıf, varsayılan değil | `5be328d` |
+| `does_not_shuffle_when_lost` testi duvar harcamayı da ilerleme sayıyor | Yeni ağ pozisyonu %23-31 görüyor, duvarla direniyor; mekik değil | `99119f9` |
+| `match` motorlara son 16 pozisyonu veriyor (web arayüzü gibi) | Eskiden iki taraf duvarlıyken 400 hamle sağ-sol yapıyordu | `65b7146` |
+| Canlı maç izleme (`GEDIK_CANLI`, `/api/canli`) ve sıfırdan yeni web arayüzü | — | `67886bb`, `c251fad` |
+| Web arayüzü seviyeleri: hepsi tüm çekirdek, 3 sn eklendi | 2 sn ≈ 6,1M iterasyon; eski "Maksimum" (1M) ≈ 0,3 sn idi | `a8fbed2` |
+
+Açık sorular:
+- 2,5 sn'de her ağaç 6M düğüm tavanına dayanıyor (~190k iterasyon/ağaç). 3 sn ve tavanı yükseltmek ölçülmedi.
+- 2,5 sn maçlarında hamle başına ortalama ~3,9 sn ölçüldü: bir motor süreyi aşıyor (muhtemelen `ru=0` tarafı her hamlede dev ağacı yeniden ayırıyor). Bakılmalı.
+- 2,5 sn final ölçümü kesinleşmedi; gece bir kez daha (`--parca 1`, SPRT sürdürme ile) çalıştırılabilir.
 
 ## Araçlar
 
