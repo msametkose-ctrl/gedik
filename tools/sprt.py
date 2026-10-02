@@ -54,9 +54,12 @@ def llr(ciftler, s0, s1):
     if n < 2:
         return 0.0
     m = sum(ciftler) / n
-    v = sum((x - m) ** 2 for x in ciftler) / n
-    # Hepsi aynı çıkarsa varyans sıfır olur; küçük bir taban koy.
-    v = max(v, 1e-3)
+    # Varyansa 4 sözde çift (0, 0.5, 0.5, 1; varyansı 0.125) ekle. Eskiden
+    # yalnız 1e-3 taban vardı: renk avantajı yüzünden çiftler 1-1 bitince
+    # varyans ~0 çıkıyor ve LLR birkaç çiftte sahte bir ret sınırına
+    # iniyordu (2,5 sn maçında 2 çiftte -0.83). Sözde çiftler az oyunda
+    # temkinli, çok oyunda etkisiz.
+    v = (sum((x - m) ** 2 for x in ciftler) + 4 * 0.125) / (n + 4)
     return n * (s1 - s0) * (2 * m - s0 - s1) / (2 * v)
 
 
