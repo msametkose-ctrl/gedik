@@ -191,10 +191,12 @@ fn cmd_selfplay(args: &[String]) {
 /// için her maç farklı bir açılıştan başlıyor ve her açılış renkler
 /// değiştirilerek iki kez oynanıyor — böylece dengesiz açılışlar ortalamada
 /// birbirini götürüyor.
-fn random_opening(seed: u64, plies: usize) -> Position {
+/// Rastgele açılış: başlangıç pozisyonu ve oynanan hamlelerin adları.
+fn random_opening(seed: u64, plies: usize) -> (Position, Vec<String>) {
     let mut rng = Rng::new(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
     'outer: loop {
         let mut p = Position::start();
+        let mut adlar = Vec::new();
         for _ in 0..plies {
             if p.winner().is_some() {
                 continue 'outer;
@@ -204,11 +206,20 @@ fn random_opening(seed: u64, plies: usize) -> Position {
             if moves.is_empty() {
                 continue 'outer;
             }
-            let mv = moves[rng.below(moves.len())];
+            // Adayların çoğu duvar (40'a karşı 3-4 piyon hamlesi). Eşit seçince
+            // açılışın neredeyse tamamı tahtanın rastgele yerlerine duvar oluyordu
+            // ve iki taraf oyuna 8 duvarla başlıyordu. 4 hamleden 3'ü piyon.
+            let piyon: Vec<_> = moves.iter().copied().filter(|m| !m.is_wall()).collect();
+            let mv = if !piyon.is_empty() && rng.below(4) != 0 {
+                piyon[rng.below(piyon.len())]
+            } else {
+                moves[rng.below(moves.len())]
+            };
+            adlar.push(move_name(&p, mv));
             p.make(mv);
         }
         if p.winner().is_none() {
-            return p;
+            return (p, adlar);
         }
     }
 }
@@ -240,6 +251,7 @@ impl Canli {
         toplam: usize,
         a_once: bool,
         skor: (usize, usize),
+        acilis: usize,
         fenler: &[String],
         hamleler: &[String],
         bitti: Option<&str>,
@@ -251,7 +263,7 @@ impl Canli {
                 .join(",")
         };
         let govde = format!(
-            r#"{{{},"oyun":{oyun},"toplam":{toplam},"a_once":{a_once},"skor":[{},{}],"bitti":{},"fenler":[{}],"hamleler":[{}]}}"#,
+            r#"{{{},"oyun":{oyun},"toplam":{toplam},"a_once":{a_once},"skor":[{},{}],"acilis":{acilis},"bitti":{},"fenler":[{}],"hamleler":[{}]}}"#,
             self.bas,
             skor.0,
             skor.1,
@@ -330,7 +342,16 @@ fn cmd_match(args: &[String]) {
     // kalan süre tahmini: 2M iterasyonlu bir maçta bir açılış çifti 10+
     // dakika sürüyor, o çözünürlükte ETA hesaplanamıyor.
     for g in 0..pairs {
-        let start = random_opening(seed + g as u64, open_plies);
+        let (start, acilis) = random_opening(seed + g as u64, open_plies);
+        // Canlı izleyici açılışı da göstersin: oyunun gerçek başlangıcından.
+        let mut acilis_fen = vec![to_fen(&Position::start())];
+        {
+            let mut p = Position::start();
+            for ad in &acilis {
+                p.make(parse_move(&p, ad).expect("açılış hamlesi"));
+                acilis_fen.push(to_fen(&p));
+            }
+        }
         for (k, a_first) in [true, false].into_iter().enumerate() {
             let mut a = Engine::parse(&spec_a, seed + g as u64 * 7 + 1);
             let mut b = Engine::parse(&spec_b, seed + g as u64 * 13 + 2);
@@ -339,8 +360,11 @@ fn cmd_match(args: &[String]) {
             let mut son: (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
             let sonuc_ham = play_from(&start, &mut a, &mut b, a_first, |f, h| {
                 if let Some(c) = &canli {
-                    c.yaz(oyun_no, toplam_oyun, a_first, (sa, sb), f, h, None);
-                    son = (f.to_vec(), h.to_vec());
+                    // f[0] açılışın son pozisyonu, acilis_fen'in sonuncusuyla aynı
+                    let fenler: Vec<String> = acilis_fen.iter().chain(&f[1..]).cloned().collect();
+                    let hamleler: Vec<String> = acilis.iter().chain(h).cloned().collect();
+                    c.yaz(oyun_no, toplam_oyun, a_first, (sa, sb), acilis.len(), &fenler, &hamleler, None);
+                    son = (fenler, hamleler);
                 }
             });
             let sonuc = match sonuc_ham {
@@ -358,7 +382,7 @@ fn cmd_match(args: &[String]) {
                 }
             };
             if let Some(c) = &canli {
-                c.yaz(oyun_no, toplam_oyun, a_first, (a_wins, b_wins), &son.0, &son.1, Some(sonuc));
+                c.yaz(oyun_no, toplam_oyun, a_first, (a_wins, b_wins), acilis.len(), &son.0, &son.1, Some(sonuc));
             }
             let oynanan = oyun_no;
             println!(
@@ -543,7 +567,8 @@ fn cmd_tournament(args: &[String]) {
                 let start = random_opening(
                     1000 + gv.g as u64 * 17 + (gv.i * 31 + gv.j) as u64,
                     4,
-                );
+                )
+                .0;
                 let mut ea = Engine::parse(&specs[gv.i], 7 + gv.g as u64 * 13 + gv.i as u64);
                 let mut eb = Engine::parse(&specs[gv.j], 11 + gv.g as u64 * 19 + gv.j as u64);
                 // i'nin bu oyundan aldigi puan: 1 kazanma, 0.5 bitmedi, 0 kayip
