@@ -3,826 +3,1294 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Quoridor motoru</title>
+<title>Gedik</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --cell: 46px;
-    --gut: 14px;
-    --bg: #12141a;
-    --panel: #1a1d26;
-    --line: #2a2f3d;
-    --ink: #e6e9f0;
-    --dim: #8c93a5;
-    --a: #f0a23c;
-    --b: #45c6e0;
-    --wall: #d8dce6;
-    --ok: #4ade80;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 24px;
-    background: var(--bg); color: var(--ink);
-    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-    display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start;
-  }
-  h1 { font-size: 16px; margin: 0 0 4px; font-weight: 600; letter-spacing: .01em; }
-  .sub { color: var(--dim); font-size: 12px; margin-bottom: 16px; }
+/* Renkler İznik çinisinden: gece kobaltı zemin, mercan (A), turkuaz (B),
+   kemik rengi duvarlar. Tahta bir yol haritası gibi okunur: kareler hedefe
+   uzaklığa göre tonlanır, iki taşın en kısa yolu iplik olarak çizilir. */
+:root {
+  --gece: #0d1330;
+  --kayrak: #141c42;
+  --kayrak2: #1a2452;
+  --cizgi: #27316a;
+  --sis: #8d96c4;
+  --kirec: #f1ece0;
+  --mercan: #ef6a4c;
+  --turkuaz: #3cc6b8;
+  --kemik: #efe6cf;
+  --hata: #ff8f7a;
+  /* tahta + çerçeve dolgusu = 11.86 kare; kalan: kenar boşlukları ve terazi */
+  --cell: clamp(24px, calc((100vw - 66px) / 11.86), 58px);
+  --gut: calc(var(--cell) * 0.28);
+  --r: 14px;
+  --display: "Unbounded", "Segoe UI", system-ui, sans-serif;
+  --body: "Instrument Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (min-width: 1000px) {
+  :root { --cell: clamp(30px, min(calc((100vh - 290px) / 11.24), calc((100vw - 560px) / 11.24)), 62px); }
+}
+* { box-sizing: border-box; }
+html { background: var(--gece); }
+body {
+  margin: 0; min-height: 100vh; color: var(--kirec);
+  font: 15px/1.5 var(--body);
+  background:
+    radial-gradient(1200px 700px at 18% -10%, #1b2a6b55, transparent 60%),
+    radial-gradient(900px 600px at 110% 110%, #0f3b4a44, transparent 60%),
+    var(--gece);
+}
+button, select, input { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--kemik); outline-offset: 2px; }
 
-  /* ---------------- tahta ---------------- */
-  .boardwrap { display: flex; gap: 8px; }
-  .ranks { display: grid; gap: 0; }
-  .ranks div {
-    height: var(--cell); line-height: var(--cell);
-    color: var(--dim); font-size: 11px; width: 16px; text-align: right;
-  }
-  .ranks div.gut { height: var(--gut); line-height: var(--gut); }
-  .files { display: grid; margin-left: 6px; }
-  .files div { width: var(--cell); color: var(--dim); font-size: 11px; text-align: center; }
-  .files div.gut { width: var(--gut); }
+/* ---------------------------------------------------------------- üst şerit */
+header {
+  display: flex; align-items: center; gap: 24px; flex-wrap: wrap;
+  padding: 18px 28px 0;
+}
+.marka { display: flex; align-items: baseline; gap: 12px; }
+.marka b {
+  font: 700 26px/1 var(--display); letter-spacing: -.02em;
+}
+.marka small { color: var(--sis); font-size: 12.5px; }
+nav { display: flex; gap: 4px; background: var(--kayrak); border: 1px solid var(--cizgi); padding: 4px; border-radius: 999px; }
+nav button {
+  border: 0; background: none; padding: 7px 16px; border-radius: 999px;
+  color: var(--sis); font-weight: 500; font-size: 14px; cursor: pointer;
+}
+nav button:hover { color: var(--kirec); }
+nav button[aria-selected="true"] { background: var(--kirec); color: var(--gece); }
+#durum {
+  margin-left: auto; font-size: 14px; color: var(--sis);
+  display: flex; align-items: center; gap: 8px; min-height: 22px;
+}
+#durum .nokta { width: 8px; height: 8px; border-radius: 50%; background: var(--sis); flex: none; }
+#durum.A .nokta { background: var(--mercan); }
+#durum.B .nokta { background: var(--turkuaz); }
+#durum.dusunuyor .nokta { animation: nabiz 1s ease-in-out infinite; }
+#durum.hata { color: var(--hata); }
+@keyframes nabiz { 50% { opacity: .25; transform: scale(.7); } }
 
-  #board {
-    display: grid;
-    grid-template-columns: repeat(8, var(--cell) var(--gut)) var(--cell);
-    grid-template-rows: repeat(8, var(--cell) var(--gut)) var(--cell);
-    background: var(--panel);
-    padding: 6px; border-radius: 10px; border: 1px solid var(--line);
-    position: relative;
-  }
-  .cell {
-    background: #22262f; border-radius: 5px;
-    display: flex; align-items: center; justify-content: center;
-    position: relative; cursor: default;
-  }
-  .cell.goalA { background: #2a2620; }
-  .cell.goalB { background: #1e262b; }
-  .cell.legal { cursor: pointer; box-shadow: inset 0 0 0 2px rgba(74,222,128,.35); }
-  .cell.legal::after {
-    content: ""; width: 9px; height: 9px; border-radius: 50%;
-    background: var(--ok); opacity: .8;
-  }
-  .pawn {
-    width: 30px; height: 30px; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 12px; font-weight: 700; color: #12141a;
-    box-shadow: 0 2px 6px rgba(0,0,0,.4);
-  }
-  .pawn.A { background: var(--a); }
-  .pawn.B { background: var(--b); }
-  .cell.legal .pawn { display: none; }
+/* ---------------------------------------------------------------- yerleşim */
+main {
+  display: flex; gap: 40px; padding: 22px 28px 40px;
+  align-items: flex-start; justify-content: center; flex-wrap: wrap;
+}
+.sahne { display: flex; gap: 14px; align-items: stretch; padding-left: 44px; }
+.sutun { display: flex; flex-direction: column; gap: 10px; }
 
-  .slot { z-index: 2; }
-  .slot.legal { cursor: pointer; }
-  .slot.legal:hover { background: rgba(216,220,230,.14); border-radius: 3px; }
-  .wall { background: var(--wall); border-radius: 3px; z-index: 1; }
-  .wall.fresh { background: var(--ok); }
-  #preview { background: rgba(216,220,230,.45); border-radius: 3px; z-index: 1; display: none; }
+/* ---------------------------------------------------------------- terazi */
+.terazi {
+  width: 10px; border-radius: 99px; position: relative; overflow: visible;
+  background: var(--turkuaz); align-self: stretch; margin: 54px 0;
+}
+.terazi .alt {
+  position: absolute; left: 0; right: 0; bottom: 0; border-radius: 99px;
+  background: var(--mercan); transition: height .6s cubic-bezier(.2,.8,.2,1);
+}
+.terazi.ustA .alt { top: 0; bottom: auto; }
+.terazi.bos { background: var(--cizgi); }
+.terazi.bos .alt { background: var(--cizgi); }
+.terazi .etiket {
+  position: absolute; right: 16px; transform: translateY(50%); text-align: right;
+  font: 500 11px var(--mono); color: var(--sis); white-space: nowrap;
+  transition: bottom .6s cubic-bezier(.2,.8,.2,1), top .6s cubic-bezier(.2,.8,.2,1);
+}
 
-  /* ---------------- panel ---------------- */
-  .panel { width: 340px; display: flex; flex-direction: column; gap: 14px; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
-  .card h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin: 0 0 10px; font-weight: 600; }
-  label { display: block; font-size: 11px; color: var(--dim); margin-bottom: 3px; }
-  select, input, button {
-    font: inherit; font-size: 13px;
-    background: #22262f; color: var(--ink);
-    border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; width: 100%;
-  }
-  button { cursor: pointer; font-weight: 500; }
-  button:hover { background: #2c313d; }
-  button.primary { background: #2f4a3a; border-color: #3d6349; }
-  button.primary:hover { background: #386047; }
-  .row { display: flex; gap: 8px; }
-  .row > * { flex: 1; }
-  .field { margin-bottom: 10px; }
-  .field:last-child { margin-bottom: 0; }
+/* ---------------------------------------------------------------- oyuncu rayı */
+.ray {
+  display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 4px;
+  position: relative;
+}
+.ray .tas { width: 22px; height: 22px; border-radius: 50%; flex: none; box-shadow: inset 0 -3px 0 #0003; }
+.ray.A .tas { background: var(--mercan); }
+.ray.B .tas { background: var(--turkuaz); }
+.ray .kim { font-weight: 600; font-size: 15px; }
+.ray .kim small { display: block; font-weight: 400; font-size: 12px; color: var(--sis); line-height: 1.2; }
+.ray .stok { display: flex; gap: 3px; margin-left: auto; align-items: center; }
+.ray .stok i {
+  display: block; width: 5px; height: 18px; border-radius: 2px; background: var(--kemik);
+  transition: background .3s, opacity .3s;
+}
+.ray .stok i.bitti { background: transparent; box-shadow: inset 0 0 0 1px var(--cizgi); }
+.ray .mesafe { font: 500 13px var(--mono); color: var(--sis); min-width: 64px; text-align: right; }
+.ray .mesafe b { font: 700 18px var(--display); color: var(--kirec); }
+.ray .sure {
+  position: absolute; left: 4px; right: 4px; bottom: 2px; height: 2px; border-radius: 2px;
+  background: var(--cizgi); overflow: hidden; opacity: 0; transition: opacity .2s;
+}
+.ray .sure i { display: block; height: 100%; width: 0; background: currentColor; }
+.ray.A .sure { color: var(--mercan); }
+.ray.B .sure { color: var(--turkuaz); }
+.ray.dusunuyor .sure { opacity: 1; }
+.ray.dusunuyor .sure.belirsiz i { width: 30%; animation: kay 1.1s ease-in-out infinite; }
+@keyframes kay { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+.ray .rozet { display: none; }
+.ray.sirada .rozet {
+  display: inline; margin-left: 8px; font: 500 10.5px var(--mono); letter-spacing: .06em;
+  text-transform: uppercase; color: var(--gece); background: var(--kirec);
+  padding: 1px 6px; border-radius: 4px; vertical-align: 2px;
+}
 
-  table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
-  th { text-align: left; color: var(--dim); font-weight: 500; font-size: 11px; padding-bottom: 4px; }
-  td { padding: 2px 0; }
-  td.num { text-align: right; color: var(--dim); }
-  .kv { display: flex; justify-content: space-between; font-size: 13px; padding: 2px 0; }
-  .kv span:last-child { font-variant-numeric: tabular-nums; }
-  .chipA { color: var(--a); font-weight: 600; }
-  .chipB { color: var(--b); font-weight: 600; }
-  #hist { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--dim); word-break: break-all; max-height: 96px; overflow-y: auto; }
-  #fen { font-family: ui-monospace, monospace; font-size: 11px; }
-  #status { font-size: 13px; min-height: 20px; }
-  .thinking { color: var(--ok); }
-  .err { color: #f87171; }
-  #elotab td.eng { cursor: pointer; }
-  #elotab tr:hover td { background: #22262f; }
-  #elotab td.rank { color: var(--dim); width: 18px; }
-  .bar { height: 4px; background: var(--ok); border-radius: 2px; opacity:.65; margin-top:3px; }
+/* ---------------------------------------------------------------- tahta */
+.cerceve {
+  padding: calc(var(--gut) * 1.1); border-radius: 18px;
+  background: linear-gradient(180deg, #18215099, #10173a99);
+  border: 1px solid var(--cizgi);
+  box-shadow: 0 30px 80px -30px #000a, inset 0 1px 0 #ffffff0d;
+  position: relative;
+}
+/* hedef sıraları: A yukarı, B aşağı gider; çerçevenin kenarı o rengi taşır */
+.cerceve::before, .cerceve::after {
+  content: ""; position: absolute; left: 22%; right: 22%; height: 3px; border-radius: 3px;
+}
+.cerceve::before { top: -2px; background: var(--hedefUst, var(--mercan)); }
+.cerceve::after { bottom: -2px; background: var(--hedefAlt, var(--turkuaz)); }
+#tahta {
+  display: grid; position: relative;
+  grid-template-columns: repeat(8, var(--cell) var(--gut)) var(--cell);
+  grid-template-rows: repeat(8, var(--cell) var(--gut)) var(--cell);
+}
+.kare {
+  border-radius: 7px; position: relative;
+  background: var(--kayrak2);
+  box-shadow: inset 0 -2px 0 #0000002e, inset 0 1px 0 #ffffff0a;
+}
+.kare .ton { position: absolute; inset: 0; border-radius: inherit; transition: background .35s; pointer-events: none; }
+.kare .koor {
+  position: absolute; font: 500 9.5px var(--mono); color: var(--sis); opacity: .55; pointer-events: none;
+}
+.kare .koor.sira { left: 4px; top: 2px; }
+.kare .koor.sutun { right: 4px; bottom: 1px; }
+.kare.legal { cursor: pointer; }
+.kare.legal::after {
+  content: ""; position: absolute; left: 50%; top: 50%; width: 26%; height: 26%;
+  transform: translate(-50%, -50%); border-radius: 50%;
+  background: var(--kirec); opacity: .55; transition: transform .15s, opacity .15s;
+}
+.kare.legal:hover::after { transform: translate(-50%, -50%) scale(1.5); opacity: .9; }
+.kare.iz { box-shadow: inset 0 0 0 2px #f1ece033; }
+.kare.isaret { box-shadow: inset 0 0 0 2px var(--kirec); }
+
+.yuva { z-index: 3; border-radius: 3px; }
+.yuva.legal { cursor: pointer; }
+.duvar {
+  background: linear-gradient(180deg, #fff8e6, var(--kemik) 45%, #d8cdb0);
+  border-radius: 4px; z-index: 2; pointer-events: none;
+  box-shadow: 0 3px 8px #0007;
+}
+.duvar.yeni { animation: kon .45s cubic-bezier(.2,1.4,.4,1); outline: 2px solid var(--kirec); outline-offset: 2px; }
+@keyframes kon { from { transform: scale(.4); opacity: 0; } }
+.hayalet {
+  background: var(--kemik); opacity: .38; border-radius: 4px; z-index: 2; pointer-events: none; display: none;
+}
+.hayalet.oneri { opacity: .7; background: none; box-shadow: inset 0 0 0 2px var(--kemik); }
+
+svg.yollar { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; overflow: visible; }
+svg.yollar path { fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 2 7; opacity: .8; transition: d .35s; }
+
+.piyon {
+  position: absolute; z-index: 4; pointer-events: none;
+  width: calc(var(--cell) * .62); height: calc(var(--cell) * .62); border-radius: 50%;
+  transition: transform .32s cubic-bezier(.3,.9,.3,1);
+  display: grid; place-items: center;
+  font: 700 calc(var(--cell) * .2) var(--display); color: #0d1330b0;
+  box-shadow: 0 8px 18px -4px #000b, inset 0 -4px 0 #00000030, inset 0 2px 0 #ffffff40;
+}
+.piyon.A { background: radial-gradient(circle at 35% 30%, #ff9a7f, var(--mercan) 60%); }
+.piyon.B { background: radial-gradient(circle at 35% 30%, #7ff0e2, var(--turkuaz) 60%); }
+
+.sonuc {
+  position: absolute; inset: 0; display: none; place-items: center; z-index: 6;
+  background: #0d133099; backdrop-filter: blur(2px); border-radius: 18px;
+}
+.sonuc.acik { display: grid; animation: belir .4s ease-out; }
+.sonuc div { text-align: center; }
+.sonuc b { display: block; font: 700 clamp(28px, calc(var(--cell) * .9), 54px)/1 var(--display); letter-spacing: -.02em; }
+.sonuc span { color: var(--sis); font-size: 14px; }
+@keyframes belir { from { opacity: 0; } }
+
+.tahta-alt { display: flex; gap: 8px; justify-content: flex-end; padding: 0 4px; }
+.cip {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;
+  font-size: 12.5px; color: var(--sis); padding: 4px 10px; border-radius: 999px; border: 1px solid var(--cizgi);
+  background: none;
+}
+.cip:hover { color: var(--kirec); }
+.cip[aria-pressed="true"] { color: var(--kirec); border-color: var(--sis); }
+
+/* ---------------------------------------------------------------- panel */
+aside { width: min(400px, 100%); display: flex; flex-direction: column; gap: 14px; }
+.kart {
+  background: var(--kayrak); border: 1px solid var(--cizgi); border-radius: var(--r);
+  padding: 16px 18px;
+}
+.kart h2 {
+  margin: 0 0 12px; font: 500 12px var(--display); letter-spacing: .04em; color: var(--sis);
+  display: flex; align-items: baseline; gap: 8px;
+}
+.kart h2 small { font: 400 12px var(--body); letter-spacing: 0; margin-left: auto; }
+[hidden] { display: none !important; }
+
+.bolum + .bolum { margin-top: 14px; }
+.etiket-k { display: block; font-size: 12.5px; color: var(--sis); margin-bottom: 6px; }
+
+.secim { display: flex; gap: 6px; }
+.secim button {
+  flex: 1; display: flex; align-items: center; gap: 8px; justify-content: center;
+  padding: 9px 10px; border-radius: 10px; border: 1px solid var(--cizgi);
+  background: var(--kayrak2); cursor: pointer; font-weight: 500; font-size: 14px; color: var(--sis);
+}
+.secim button[aria-pressed="true"] { color: var(--kirec); border-color: var(--kirec); }
+.secim .tas { width: 12px; height: 12px; border-radius: 50%; }
+
+.seviyeler { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.seviyeler button {
+  text-align: left; padding: 9px 11px; border-radius: 10px; border: 1px solid var(--cizgi);
+  background: var(--kayrak2); cursor: pointer; display: flex; flex-direction: column; gap: 1px;
+}
+.seviyeler button b { font-weight: 600; font-size: 14px; }
+.seviyeler button span { font-size: 12px; color: var(--sis); }
+.seviyeler button:hover { border-color: var(--sis); }
+.seviyeler button[aria-pressed="true"] { border-color: var(--kirec); background: #222d63; }
+/* basamak: seviyeyi doluluk çubuğuyla göster */
+.seviyeler button i { display: block; height: 3px; border-radius: 2px; background: var(--cizgi); margin-top: 6px; overflow: hidden; }
+.seviyeler button i::after { content: ""; display: block; height: 100%; width: var(--g); background: var(--kemik); }
+
+.dugmeler { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.dugme {
+  padding: 9px 12px; border-radius: 10px; border: 1px solid var(--cizgi);
+  background: var(--kayrak2); cursor: pointer; font-weight: 500; font-size: 14px;
+}
+.dugme:hover { border-color: var(--sis); }
+.dugme.ana { background: var(--kirec); color: var(--gece); border-color: var(--kirec); font-weight: 600; }
+.dugme.ana:hover { background: #fff; }
+.dugme:disabled { opacity: .45; cursor: default; }
+.tam { grid-column: 1 / -1; }
+
+select, input[type=text] {
+  width: 100%; padding: 9px 11px; border-radius: 10px; border: 1px solid var(--cizgi);
+  background: var(--kayrak2); font-size: 14px;
+}
+select option { background: var(--kayrak); }
+.iki { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+/* motorun gözünden */
+#aramaBilgi { font-size: 13px; color: var(--sis); }
+#aramaBilgi b { color: var(--kirec); font: 700 15px var(--display); margin-right: 4px; }
+.adaylar { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.adaylar li {
+  display: grid; grid-template-columns: 54px 1fr 52px; align-items: center; gap: 10px;
+  padding: 4px 6px; border-radius: 8px; cursor: default; font-size: 13px;
+}
+.adaylar li:hover { background: var(--kayrak2); }
+.adaylar li .ad { font: 500 13px var(--mono); }
+.adaylar li .cubuk { height: 6px; border-radius: 3px; background: var(--cizgi); overflow: hidden; }
+.adaylar li .cubuk i { display: block; height: 100%; background: var(--kemik); border-radius: 3px; }
+.adaylar li .yuzde { font: 500 12.5px var(--mono); color: var(--sis); text-align: right; }
+.adaylar li:first-child .ad, .adaylar li:first-child .yuzde { color: var(--kirec); }
+
+/* hamle listesi: gerçek bir sıra, numaralar hamle çiftini taşır */
+.hamleler {
+  display: grid; grid-template-columns: 30px 1fr 1fr; row-gap: 1px; column-gap: 6px;
+  font: 400 13px var(--mono); max-height: 180px; overflow-y: auto; padding-right: 4px;
+}
+.hamleler .no { color: var(--sis); text-align: right; }
+.hamleler .h { padding: 0 6px; border-radius: 4px; }
+.hamleler .h.A { color: #ffb3a1; }
+.hamleler .h.B { color: #9ff0e6; }
+.hamleler .h.son { background: var(--kayrak2); }
+.bos { color: var(--sis); font-size: 13px; }
+
+details summary { cursor: pointer; color: var(--sis); font-size: 13px; list-style: none; }
+details summary::before { content: "+ "; font-family: var(--mono); }
+details[open] summary::before { content: "− "; }
+details .icerik { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+#fen { font: 400 12.5px var(--mono); }
+
+/* maç skoru */
+.skorpano { display: flex; align-items: center; justify-content: center; gap: 18px; padding: 8px 0 4px; }
+.skorpano .sayi { font: 700 40px/1 var(--display); letter-spacing: -.03em; }
+.skorpano .sayi.A { color: var(--mercan); }
+.skorpano .sayi.B { color: var(--turkuaz); }
+.skorpano .ara { color: var(--sis); font-size: 13px; text-align: center; line-height: 1.35; }
+#macNot { color: var(--sis); font-size: 12.5px; text-align: center; min-height: 18px; }
+
+/* tablolar */
+table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+th { text-align: left; color: var(--sis); font-weight: 500; font-size: 12px; padding: 0 0 6px; }
+td { padding: 5px 0; border-top: 1px solid #27316a80; }
+td.s, th.s { text-align: right; }
+td.mono { font-family: var(--mono); font-size: 12.5px; }
+.kesin-arti { color: #7fe3a5; font-weight: 600; }
+.kesin-eksi { color: var(--hata); font-weight: 600; }
+.soluk { color: var(--sis); }
+#gucTablo tr.sec { cursor: pointer; }
+#gucTablo tr.sec:hover td { background: var(--kayrak2); }
+.elobar { height: 3px; border-radius: 2px; background: var(--kemik); opacity: .6; margin-top: 4px; }
+
+.canli-satir { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid #27316a80; }
+.canli-satir:first-child { border-top: 0; padding-top: 0; }
+.canli-satir .yazi { flex: 1; font-size: 13px; line-height: 1.4; }
+.canli-satir .yazi b { font-weight: 600; }
+.canli-satir .yazi span { color: var(--sis); }
+.canli-satir .dugme { padding: 6px 14px; }
+.canli-detay { font: 400 12px var(--mono); color: var(--sis); padding: 0 0 8px; line-height: 1.6; }
+.canli-isik { width: 8px; height: 8px; border-radius: 50%; background: #7fe3a5; animation: nabiz 1.4s ease-in-out infinite; flex: none; }
+
+.not { color: var(--sis); font-size: 12.5px; line-height: 1.5; margin-top: 10px; }
+code { font: 400 12px var(--mono); background: var(--kayrak2); padding: 1px 5px; border-radius: 4px; }
+
+@media (max-width: 999px) {
+  header { padding: 14px 16px 0; gap: 12px; }
+  #durum { margin-left: 0; width: 100%; }
+  main { padding: 14px 16px 32px; gap: 24px; }
+  .terazi { margin: 54px 0; width: 8px; }
+  .terazi .etiket { display: none; }
+  .sahne { padding-left: 0; gap: 10px; }
+  .ray { gap: 8px; }
+  .ray .stok i { width: 4px; height: 14px; }
+  .ray .mesafe { min-width: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
 </style>
 </head>
 <body>
 
-<div>
-  <h1>Quoridor motoru</h1>
-  <div class="sub">bitboard çekirdek + heuristic MCTS · yerel</div>
-  <div class="boardwrap">
-    <div class="ranks" id="ranks"></div>
-    <div>
-      <div id="board"></div>
-      <div class="files" id="files"></div>
-    </div>
-  </div>
-</div>
+<header>
+  <div class="marka"><b>gedik</b><small>Quoridor motoru · bu bilgisayarda</small></div>
+  <nav role="tablist" aria-label="Bölümler">
+    <button role="tab" data-sekme="oyna" aria-selected="true">Oyna</button>
+    <button role="tab" data-sekme="mac" aria-selected="false">Motor maçı</button>
+    <button role="tab" data-sekme="lab" aria-selected="false">Laboratuvar</button>
+  </nav>
+  <div id="durum" role="status" aria-live="polite"><span class="nokta"></span><span id="durumYazi">Hazırlanıyor</span></div>
+</header>
 
-<div class="panel">
-  <div class="card">
-    <h2>Oyun</h2>
-    <div class="field">
-      <label>Sen</label>
-      <select id="you">
-        <option value="0">A — altta, yukarı çıkar (ilk oynar)</option>
-        <option value="1">B — üstte, aşağı iner</option>
-        <option value="none">izleyici — iki motor oynasın</option>
-      </select>
+<main>
+  <div class="sahne">
+    <div class="terazi bos" id="terazi" title="Kazanma şansı (son aramaya göre)">
+      <div class="alt" id="teraziAlt" style="height:50%"></div>
+      <div class="etiket" id="teraziYazi" style="bottom:50%">—</div>
     </div>
-    <div class="field">
-      <label>A motoru (sen A değilsen)</label>
-      <select id="engA"></select>
-    </div>
-    <div class="field">
-      <label>B motoru (sen B değilsen)</label>
-      <select id="engB"></select>
-    </div>
-    <div class="field row">
-      <button class="primary" id="new">Yeni oyun</button>
-      <button id="undo">Geri al</button>
-    </div>
-    <div class="field row">
-      <button id="flip">Tahtayı çevir</button>
-      <button id="hint">Motora sor</button>
+    <div class="sutun">
+      <div class="ray" id="rayUst"></div>
+      <div class="cerceve" id="cerceve">
+        <div id="tahta"></div>
+        <div class="sonuc" id="sonuc"><div><b id="sonucBas"></b><span id="sonucAlt"></span></div></div>
+      </div>
+      <div class="ray" id="rayAlt"></div>
+      <div class="tahta-alt">
+        <button class="cip" id="yolCip" aria-pressed="true">Yollar ve harita</button>
+        <button class="cip" id="cevir" aria-pressed="false">Tahtayı çevir</button>
+      </div>
     </div>
   </div>
 
-  <div class="card">
-    <h2>Maç modu</h2>
-    <div class="field">
-      <label>Hız</label>
-      <select id="hiz">
-        <option value="0">en hızlı — bekleme yok</option>
-        <option value="120" selected>hızlı (0.12 sn)</option>
-        <option value="400">izlenebilir (0.4 sn)</option>
-        <option value="1000">yavaş (1 sn)</option>
-      </select>
+  <aside>
+    <!-- ======================================================= Oyna -->
+    <section data-panel="oyna">
+      <div class="kart">
+        <div class="bolum">
+          <span class="etiket-k">Rengin</span>
+          <div class="secim" id="renkSecim">
+            <button data-renk="0" aria-pressed="true"><span class="tas" style="background:var(--mercan)"></span>A · alttan, ilk sen</button>
+            <button data-renk="1" aria-pressed="false"><span class="tas" style="background:var(--turkuaz)"></span>B · üstten</button>
+          </div>
+        </div>
+        <div class="bolum">
+          <span class="etiket-k">Rakibin gücü</span>
+          <div class="seviyeler" id="seviyeler"></div>
+        </div>
+        <div class="bolum dugmeler">
+          <button class="dugme ana" id="yeni">Yeni oyun</button>
+          <button class="dugme" id="geri">Hamleyi geri al</button>
+          <button class="dugme tam" id="ipucu">Motora sor: burada ne oynardı?</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================= Motor maçı -->
+    <section data-panel="mac" hidden>
+      <div class="kart">
+        <div class="bolum iki">
+          <label><span class="etiket-k"><span style="color:var(--mercan)">●</span> A motoru</span><select id="engA"></select></label>
+          <label><span class="etiket-k"><span style="color:var(--turkuaz)">●</span> B motoru</span><select id="engB"></select></label>
+        </div>
+        <div class="bolum iki">
+          <label><span class="etiket-k">Hamleler arası bekleme</span>
+            <select id="hiz">
+              <option value="0">Yok</option>
+              <option value="120">0,12 sn</option>
+              <option value="400" selected>0,4 sn</option>
+              <option value="1000">1 sn</option>
+            </select></label>
+          <label><span class="etiket-k">Açılış</span>
+            <select id="acilis">
+              <option value="0">Standart</option>
+              <option value="4">4 rastgele yarım hamle</option>
+              <option value="6" selected>6 rastgele yarım hamle</option>
+              <option value="8">8 rastgele yarım hamle</option>
+            </select></label>
+        </div>
+        <div class="bolum dugmeler">
+          <button class="dugme ana" id="macbas">Maçı başlat</button>
+          <button class="dugme" id="macdur" disabled>Maçı durdur</button>
+          <button class="dugme tam" id="tekOyun">Tek oyun oynat ve izle</button>
+        </div>
+        <div class="bolum">
+          <div class="skorpano">
+            <span class="sayi A" id="skorA">0</span>
+            <span class="ara" id="skorOran">henüz<br>oyun yok</span>
+            <span class="sayi B" id="skorB">0</span>
+          </div>
+          <div id="macNot">Her oyunda renkler değişir, aynı açılış iki renkle de oynanır.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================= Laboratuvar -->
+    <section data-panel="lab" hidden>
+      <div class="kart" id="canliKart" hidden>
+        <h2>Canlı maçlar <small>arka planda oynanıyor</small></h2>
+        <div id="canliListe"></div>
+      </div>
+      <div class="kart" id="deneyKart" hidden style="margin-top:14px">
+        <h2>Deneyler <small id="deneyNot"></small></h2>
+        <div id="deneyListe"></div>
+      </div>
+      <div class="kart" style="margin-top:14px">
+        <h2>Motor gücü <small id="gucNot"></small></h2>
+        <div id="gucListe" class="bos">Yükleniyor…</div>
+      </div>
+    </section>
+
+    <!-- ======================================================= her sekmede -->
+    <div class="kart">
+      <h2>Motorun gözünden <small id="aramaZaman"></small></h2>
+      <div id="aramaBilgi">Motor hamle yapınca en çok düşündüğü seçenekler burada görünür. Üstüne gel, tahtada yerini gör.</div>
+      <ul class="adaylar" id="adaylar"></ul>
     </div>
-    <div class="field">
-      <label>Açılış</label>
-      <select id="acilis">
-        <option value="0">standart (hep aynı oyun)</option>
-        <option value="4">4 yarım hamle rastgele</option>
-        <option value="6" selected>6 yarım hamle rastgele</option>
-        <option value="8">8 yarım hamle rastgele</option>
-      </select>
+
+    <div class="kart">
+      <h2>Hamleler <small id="hamleSay"></small></h2>
+      <div class="hamleler" id="hamleler"></div>
+      <details style="margin-top:12px">
+        <summary>Pozisyon kodu (FEN)</summary>
+        <div class="icerik">
+          <input type="text" id="fen" spellcheck="false" aria-label="FEN">
+          <div class="dugmeler">
+            <button class="dugme" id="fenYukle">Bu pozisyonu aç</button>
+            <button class="dugme" id="fenKopya">Kopyala</button>
+          </div>
+        </div>
+      </details>
     </div>
-    <div class="field row">
-      <button class="primary" id="macbas">Maç başlat</button>
-      <button id="macdur">Durdur</button>
-    </div>
-    <div id="skor" style="color:var(--dim);font-size:12px">maç yok</div>
-  </div>
-
-  <div class="card">
-    <h2>Durum</h2>
-    <div id="status">—</div>
-    <div class="kv"><span class="chipA">A</span><span id="sA">—</span></div>
-    <div class="kv"><span class="chipB">B</span><span id="sB">—</span></div>
-  </div>
-
-  <div class="card" id="deneykart" style="display:none">
-    <h2>Deneyler <span id="deneynot" style="text-transform:none;letter-spacing:0;color:var(--dim);font-weight:400"></span></h2>
-    <div id="deneywrap" style="color:var(--dim);font-size:12px"></div>
-  </div>
-
-  <div class="card" id="canlikart" style="display:none">
-    <h2>Canlı maçlar</h2>
-    <div id="canliwrap" style="font-size:12px"></div>
-  </div>
-
-  <div class="card">
-    <h2>Motor gücü <span id="elonote" style="text-transform:none;letter-spacing:0"></span></h2>
-    <div id="elowrap" style="color:var(--dim);font-size:12px">yükleniyor…</div>
-  </div>
-
-  <div class="card">
-    <h2>Son arama</h2>
-    <div id="botinfo" style="color:var(--dim);font-size:12px">henüz arama yok</div>
-    <table id="toptab" style="margin-top:8px;display:none">
-      <thead><tr><th>hamle</th><th class="num">ziyaret</th><th class="num">kazanma</th></tr></thead>
-      <tbody></tbody>
-    </table>
-  </div>
-
-  <div class="card">
-    <h2>Hamleler</h2>
-    <div id="hist">—</div>
-  </div>
-
-  <div class="card">
-    <h2>Pozisyon</h2>
-    <input id="fen" spellcheck="false">
-    <div class="field row" style="margin-top:8px">
-      <button id="load">FEN yükle</button>
-      <button id="copy">Kopyala</button>
-    </div>
-  </div>
-</div>
+  </aside>
+</main>
 
 <script>
+"use strict";
 const N = 9, WD = 8;
+const $ = id => document.getElementById(id);
+const tahta = $("tahta");
+
+// ------------------------------------------------------------------ seviyeler
+// Hepsi tüm çekirdekleri kullanır (t=0, kök paralelliği). Sabit iterasyonlu
+// seviyelerde toplam iterasyon ağaçlara bölündüğü için çekirdek sayısıyla
+// çarpılır; her ağaç seviyenin adı kadar düşünür.
 let CORES = 1;
-// Hepsi tüm çekirdekleri kullanır (t=0, kök paralelliği: çekirdek başına
-// ayrı ağaç). Sabit iterasyonlu kolay seviyelerde toplam iterasyon ağaçlara
-// bölündüğü için sayı çekirdek sayısıyla çarpılır; her ağaç eskisi kadar
-// düşünür, seviyeler birbirine göre yerini korur, cevap anında gelir.
-let ENGINES = [];
-function buildEngines() {
+let SEVIYELER = [];
+function seviyeleriKur() {
   const c = Math.max(1, CORES);
-  ENGINES = [
-    [`mcts:${2500 * c}:t=0`,  "Kolay — 2 500 iterasyon / çekirdek"],
-    [`mcts:${20000 * c}:t=0`, "Orta — 20 000 iterasyon / çekirdek"],
-    [`mcts:${60000 * c}:t=0`, "Zor — 60 000 iterasyon / çekirdek (~0.6 sn)"],
-    ["mcts:1000ms:t=0",  "Usta — 1 saniye"],
-    ["mcts:2000ms:t=0",  "Büyükusta — 2 saniye"],
-    ["mcts:3000ms:t=0",  "Maksimum — 3 saniye"],
+  SEVIYELER = [
+    { spec: `mcts:${2500 * c}:t=0`,  ad: "Kolay",     not: "anında",      g: 12 },
+    { spec: `mcts:${20000 * c}:t=0`, ad: "Orta",      not: "anında",      g: 30 },
+    { spec: `mcts:${60000 * c}:t=0`, ad: "Zor",       not: "~0,6 sn",     g: 48 },
+    { spec: "mcts:1000ms:t=0",       ad: "Usta",      not: "1 sn düşünür", g: 66 },
+    { spec: "mcts:2000ms:t=0",       ad: "Büyükusta", not: "2 sn düşünür", g: 84 },
+    { spec: "mcts:3000ms:t=0",       ad: "Maksimum",  not: "3 sn düşünür", g: 100 },
   ];
 }
+let seviye = "mcts:2000ms:t=0";
+const seviyeAdi = spec => (SEVIYELER.find(s => s.spec === spec) || { ad: spec }).ad;
 
-// Sayfa URL'inde ?fen=... varsa oradan başla — pozisyon paylaşmayı ve
-// belirli bir pozisyonu tekrar tekrar test etmeyi kolaylaştırıyor.
+// ?fen=... ile belirli bir pozisyondan başlanabilir.
 const START = new URLSearchParams(location.search).get("fen") || "0/0/76/4/10/10/0/0";
 
-let history = [];          // fen listesi
-let state = null;          // /api/state cevabı
-let flipped = false;
-let busy = false;
-let lastMoveSlot = null;   // {kind, slot} — yeni konan duvarı vurgulamak için
-const names = [];          // oynanan hamlelerin notasyonu
+// ------------------------------------------------------------------ durum
+let sekme = "oyna";
+let renk = "0";             // oyna sekmesinde insanın tarafı
+let gecmis = [];            // fen listesi
+const adlar = [];           // hamle adları
+let state = null;           // /api/state cevabı
+let cevrik = false;
+let mesgul = false;
+let yeniDuvar = null;       // {kind, slot}
+let oncekiPiyon = null;     // bir önceki pozisyondaki piyonlar (iz için)
+let izKare = null;
+let yollarAcik = true;
+let degerA = null;          // A'nın kazanma şansı (son aramadan)
+let arama = null;           // {sonuc, state} son arama
+let macKosuyor = false, otomatik = false, swapEng = false;
+let izlenen = null, izlenenHamle = -1;
+let skor = { a: 0, b: 0, yarim: 0, oyun: 0 };
 
-const $ = id => document.getElementById(id);
-const board = $("board");
+function insanTarafi() {
+  if (sekme !== "oyna" || macKosuyor || otomatik || izlenen) return null;
+  return renk;
+}
+function motorSirasi() {
+  if (!state || state.winner !== null || izlenen) return false;
+  if (macKosuyor || otomatik) return true;
+  return sekme === "oyna" && String(state.side) !== renk;
+}
+function benimSiram() {
+  const h = insanTarafi();
+  return h !== null && state && String(state.side) === h && state.winner === null;
+}
+function motorFor(side) {
+  if (sekme === "oyna" && !macKosuyor && !otomatik) return seviye;
+  const s = swapEng ? 1 - side : side;
+  return s === 0 ? $("engA").value : $("engB").value;
+}
 
-// -------------------------------------------------- ızgara yerleşimi
-const dispRow = r => flipped ? (N - 1 - r) : r;          // hücre satırı
-const dispGut = r => flipped ? (WD - 1 - r) : r;         // duvar oluğu
-
-function place(el, r0, c0, rs, cs) {
+// ------------------------------------------------------------------ ızgara
+const satirG = r => cevrik ? N - 1 - r : r;
+const olukG = r => cevrik ? WD - 1 - r : r;
+function yerlestir(el, r0, c0, rs, cs) {
   el.style.gridRow = `${r0} / span ${rs}`;
   el.style.gridColumn = `${c0} / span ${cs}`;
 }
-
-function layoutCell(el, r, c) { place(el, 2 * dispRow(r) + 1, 2 * c + 1, 1, 1); }
-// yatay duvar (r,c): r/r+1 arası oluk, c ve c+1 sütunlarını kaplar
-function layoutH(el, r, c, span) { place(el, 2 * dispGut(r) + 2, 2 * c + 1, 1, span); }
-// dikey duvar (r,c): c/c+1 arası oluk, r ve r+1 satırlarını kaplar
-function layoutV(el, r, c, span) {
-  const top = flipped ? dispRow(r + 1) : dispRow(r);
-  place(el, 2 * top + 1, 2 * c + 2, span, 1);
+const kareYer = (el, r, c) => yerlestir(el, 2 * satirG(r) + 1, 2 * c + 1, 1, 1);
+// yatay duvar (r,c): r ile r+1 arasındaki oluk, c ve c+1 sütunları
+const yatayYer = (el, r, c, span) => yerlestir(el, 2 * olukG(r) + 2, 2 * c + 1, 1, span);
+// dikey duvar (r,c): c ile c+1 arasındaki oluk, r ve r+1 satırları
+function dikeyYer(el, r, c, span) {
+  const ust = cevrik ? satirG(r + 1) : satirG(r);
+  yerlestir(el, 2 * ust + 1, 2 * c + 2, span, 1);
 }
 
-// -------------------------------------------------- DOM kurulumu
-const cells = [], hslots = [], vslots = [];
-const preview = document.createElement("div");
-preview.id = "preview";
-const wallLayer = [];
+const kareler = [], tonlar = [], hYuva = [], vYuva = [], duvarlar = [];
+const hayalet = document.createElement("div"); hayalet.className = "hayalet";
+const oneri = document.createElement("div"); oneri.className = "hayalet oneri";
+const SVGNS = "http://www.w3.org/2000/svg";
+const svg = document.createElementNS(SVGNS, "svg"); svg.classList.add("yollar");
+const yolA = document.createElementNS(SVGNS, "path"); yolA.setAttribute("stroke", "var(--mercan)");
+const yolB = document.createElementNS(SVGNS, "path"); yolB.setAttribute("stroke", "var(--turkuaz)");
+svg.append(yolA, yolB);
+const piyonA = document.createElement("div"); piyonA.className = "piyon A"; piyonA.textContent = "A";
+const piyonB = document.createElement("div"); piyonB.className = "piyon B"; piyonB.textContent = "B";
 
-function build() {
-  board.innerHTML = "";
+function kur() {
+  tahta.innerHTML = "";
   for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    const i = r * N + c;
     const d = document.createElement("div");
-    d.className = "cell";
-    if (r === 0) d.classList.add("goalA");
-    if (r === N - 1) d.classList.add("goalB");
-    d.dataset.i = r * N + c;
-    d.onclick = () => onCell(r * N + c);
-    board.appendChild(d);
-    cells[r * N + c] = d;
+    d.className = "kare";
+    const t = document.createElement("div"); t.className = "ton"; d.appendChild(t);
+    d.onclick = () => kareTik(i);
+    d.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); kareTik(i); } };
+    tahta.appendChild(d);
+    kareler[i] = d; tonlar[i] = t;
   }
   for (let r = 0; r < WD; r++) for (let c = 0; c < WD; c++) {
     for (const kind of ["h", "v"]) {
       const d = document.createElement("div");
-      d.className = "slot " + kind;
+      d.className = "yuva";
       const slot = r * WD + c;
-      d.onclick = () => onSlot(kind, slot);
+      d.onclick = () => yuvaTik(kind, slot);
       d.onmouseenter = () => {
         if (!d.classList.contains("legal")) return;
-        preview.className = kind;
-        if (kind === "h") layoutH(preview, r, c, 3); else layoutV(preview, r, c, 3);
-        preview.style.display = "block";
+        if (kind === "h") yatayYer(hayalet, r, c, 3); else dikeyYer(hayalet, r, c, 3);
+        hayalet.style.display = "block";
       };
-      d.onmouseleave = () => { preview.style.display = "none"; };
-      board.appendChild(d);
-      (kind === "h" ? hslots : vslots)[slot] = d;
+      d.onmouseleave = () => { hayalet.style.display = "none"; };
+      tahta.appendChild(d);
+      (kind === "h" ? hYuva : vYuva)[slot] = d;
     }
   }
-  board.appendChild(preview);
-  relayout();
-  labels();
+  tahta.append(hayalet, oneri, svg, piyonA, piyonB);
+  yeniden();
 }
 
-function relayout() {
-  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) layoutCell(cells[r * N + c], r, c);
+function yeniden() {
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) kareYer(kareler[r * N + c], r, c);
   for (let r = 0; r < WD; r++) for (let c = 0; c < WD; c++) {
-    layoutH(hslots[r * WD + c], r, c, 2);
-    layoutV(vslots[r * WD + c], r, c, 2);
+    yatayYer(hYuva[r * WD + c], r, c, 2);
+    dikeyYer(vYuva[r * WD + c], r, c, 2);
   }
-  for (const w of wallLayer) {
-    if (w.kind === "h") layoutH(w.el, w.r, w.c, 3); else layoutV(w.el, w.r, w.c, 3);
+  // koordinatlar: sol sütunda sıra numarası, alt sırada harf (lichess usulü)
+  for (const k of kareler) k.querySelectorAll(".koor").forEach(e => e.remove());
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    const k = kareler[r * N + c];
+    if (c === 0) { const s = document.createElement("span"); s.className = "koor sira"; s.textContent = N - r; k.appendChild(s); }
+    if (satirG(r) === N - 1) { const s = document.createElement("span"); s.className = "koor sutun"; s.textContent = String.fromCharCode(97 + c); k.appendChild(s); }
   }
+  // A yukarı (0. satıra) gider. Çerçevenin üst kenarı yukarıdaki hedefin sahibini taşır.
+  $("cerceve").style.setProperty("--hedefUst", cevrik ? "var(--turkuaz)" : "var(--mercan)");
+  $("cerceve").style.setProperty("--hedefAlt", cevrik ? "var(--mercan)" : "var(--turkuaz)");
+  ciz();
 }
 
-function labels() {
-  const ranks = $("ranks"), files = $("files");
-  ranks.innerHTML = ""; files.innerHTML = "";
-  for (let r = 0; r < N; r++) {
-    const d = document.createElement("div");
-    d.textContent = flipped ? (r + 1) : (N - r);   // notasyon satırı
-    ranks.appendChild(d);
-    if (r < N - 1) { const g = document.createElement("div"); g.className = "gut"; ranks.appendChild(g); }
+// ------------------------------------------------------------------ yol bulma
+// Duvar kuralı: yatay duvar (r,c) r/r+1 arasını c ve c+1 sütunlarında,
+// dikey duvar (r,c) c/c+1 arasını r ve r+1 satırlarında keser.
+function engelli(h, v) {
+  const hs = new Set(h), vs = new Set(v);
+  const asagi = (r, c) => hs.has(r * WD + c) || (c > 0 && hs.has(r * WD + c - 1));
+  const saga = (r, c) => vs.has(r * WD + c) || (r > 0 && vs.has((r - 1) * WD + c));
+  return (r, c, dr, dc) => {
+    if (dr === 1) return r >= N - 1 || asagi(r, c);
+    if (dr === -1) return r <= 0 || asagi(r - 1, c);
+    if (dc === 1) return c >= N - 1 || saga(r, c);
+    return c <= 0 || saga(r, c - 1);
+  };
+}
+const YON = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+// hedef satırdan çok kaynaklı BFS: her karenin hedefe adım sayısı
+function uzaklik(hedefSatir, kapali) {
+  const d = new Array(N * N).fill(Infinity), q = [];
+  for (let c = 0; c < N; c++) { d[hedefSatir * N + c] = 0; q.push(hedefSatir * N + c); }
+  for (let k = 0; k < q.length; k++) {
+    const i = q[k], r = Math.floor(i / N), c = i % N;
+    for (const [dr, dc] of YON) {
+      if (kapali(r, c, dr, dc)) continue;
+      const j = (r + dr) * N + c + dc;
+      if (d[j] === Infinity) { d[j] = d[i] + 1; q.push(j); }
+    }
   }
-  for (let c = 0; c < N; c++) {
-    const d = document.createElement("div");
-    d.textContent = String.fromCharCode(97 + c);
-    files.appendChild(d);
-    if (c < N - 1) { const g = document.createElement("div"); g.className = "gut"; files.appendChild(g); }
+  return d;
+}
+function yol(bas, d, kapali, tercih) {
+  const p = [bas]; let i = bas;
+  for (let g = 0; g < 100 && d[i] > 0 && d[i] !== Infinity; g++) {
+    const r = Math.floor(i / N), c = i % N;
+    let sonraki = -1;
+    for (const [dr, dc] of [[tercih, 0], [0, -1], [0, 1], [-tercih, 0]]) {
+      if (kapali(r, c, dr, dc)) continue;
+      const j = (r + dr) * N + c + dc;
+      if (d[j] === d[i] - 1) { sonraki = j; break; }
+    }
+    if (sonraki < 0) break;
+    p.push(sonraki); i = sonraki;
   }
-  files.style.display = "flex";
-  ranks.style.marginTop = "6px";
+  return p;
 }
 
-// -------------------------------------------------- render
-function render() {
+// ------------------------------------------------------------------ çizim
+function merkez(i) {
+  const k = kareler[i];
+  return [k.offsetLeft + k.offsetWidth / 2, k.offsetTop + k.offsetHeight / 2];
+}
+
+function ciz() {
   if (!state) return;
   // duvarlar
-  for (const w of wallLayer) w.el.remove();
-  wallLayer.length = 0;
+  for (const w of duvarlar) w.remove();
+  duvarlar.length = 0;
   for (const [kind, list] of [["h", state.h], ["v", state.v]]) {
     for (const slot of list) {
       const el = document.createElement("div");
-      el.className = "wall " + kind;
-      if (lastMoveSlot && lastMoveSlot.kind === kind && lastMoveSlot.slot === slot) el.classList.add("fresh");
-      board.appendChild(el);
-      const w = { el, kind, r: Math.floor(slot / WD), c: slot % WD };
-      wallLayer.push(w);
-      if (kind === "h") layoutH(el, w.r, w.c, 3); else layoutV(el, w.r, w.c, 3);
+      el.className = "duvar";
+      if (yeniDuvar && yeniDuvar.kind === kind && yeniDuvar.slot === slot) el.classList.add("yeni");
+      const r = Math.floor(slot / WD), c = slot % WD;
+      if (kind === "h") yatayYer(el, r, c, 3); else dikeyYer(el, r, c, 3);
+      tahta.appendChild(el);
+      duvarlar.push(el);
     }
   }
 
-  // piyonlar + legal işaretleri
-  for (let i = 0; i < N * N; i++) { cells[i].innerHTML = ""; cells[i].classList.remove("legal"); }
-  for (const s of hslots) s.classList.remove("legal");
-  for (const s of vslots) s.classList.remove("legal");
-
-  for (const [idx, who] of [[state.pawn[0], "A"], [state.pawn[1], "B"]]) {
-    const p = document.createElement("div");
-    p.className = "pawn " + who;
-    p.textContent = who;
-    cells[idx].appendChild(p);
-  }
-
-  const myTurn = humanSide() !== null && String(state.side) === humanSide() && state.winner === null;
-  if (myTurn) {
+  // legal işaretler
+  for (const k of kareler) { k.classList.remove("legal", "iz"); k.removeAttribute("tabindex"); }
+  for (const s of hYuva) s.classList.remove("legal");
+  for (const s of vYuva) s.classList.remove("legal");
+  if (izKare !== null) kareler[izKare].classList.add("iz");
+  const siram = benimSiram();
+  if (siram && !mesgul) {
     for (const m of state.moves) {
-      if (m.kind === "p") cells[m.to].classList.add("legal");
-      else if (m.kind === "h") hslots[m.slot].classList.add("legal");
-      else vslots[m.slot].classList.add("legal");
+      if (m.kind === "p") { kareler[m.to].classList.add("legal"); kareler[m.to].tabIndex = 0; }
+      else (m.kind === "h" ? hYuva : vYuva)[m.slot].classList.add("legal");
     }
   }
 
-  // durum
-  const turn = state.side === 0 ? "A" : "B";
-  let st;
-  if (state.winner !== null) st = `<b>${state.winner === 0 ? "A" : "B"} kazandı.</b>`;
-  else if (busy) st = `<span class="thinking">${turn} düşünüyor…</span>`;
-  else st = `Sıra: <span class="chip${turn}">${turn}</span>${myTurn ? " — senin hamlen" : ""}`;
-  $("status").innerHTML = st;
-  $("sA").textContent = `duvar ${state.walls[0]} · hedefe ${state.dist[0] ?? "-"}`;
-  $("sB").textContent = `duvar ${state.walls[1]} · hedefe ${state.dist[1] ?? "-"}`;
-  $("hist").textContent = names.length ? names.join(" ") : "—";
+  // piyonlar
+  const boy = kareler[0].offsetWidth * 0.62;
+  for (const [el, i] of [[piyonA, state.pawn[0]], [piyonB, state.pawn[1]]]) {
+    const [x, y] = merkez(i);
+    el.style.transform = `translate(${x - boy / 2}px, ${y - boy / 2}px)`;
+  }
+
+  // harita ve yollar
+  const kapali = engelli(state.h, state.v);
+  const dA = uzaklik(0, kapali), dB = uzaklik(N - 1, kapali);
+  if (yollarAcik) {
+    // ton: sırası gelen tarafın gözünden hedefe yakınlık
+    const taraf = state.winner === null ? state.side : 0;
+    const d = taraf === 0 ? dA : dB;
+    const renkTon = taraf === 0 ? "239,106,76" : "60,198,184";
+    let ust = 1;
+    for (const x of d) if (x !== Infinity && x > ust) ust = x;
+    for (let i = 0; i < N * N; i++) {
+      const a = d[i] === Infinity ? 0 : 0.2 * Math.pow(1 - d[i] / (ust + 1), 1.6);
+      tonlar[i].style.background = `rgba(${renkTon},${a.toFixed(3)})`;
+    }
+    const cizgi = (p) => p.map((i, k) => { const [x, y] = merkez(i); return `${k ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`; }).join(" ");
+    yolA.setAttribute("d", cizgi(yol(state.pawn[0], dA, kapali, -1)));
+    yolB.setAttribute("d", cizgi(yol(state.pawn[1], dB, kapali, 1)));
+    svg.style.display = "";
+  } else {
+    for (const t of tonlar) t.style.background = "";
+    svg.style.display = "none";
+  }
+
+  raylar();
+  durumYaz();
+  hamleListesi();
   $("fen").value = state.fen;
+
+  const son = $("sonuc");
+  if (state.winner !== null && !mesgul) {
+    const k = state.winner === 0 ? "A" : "B";
+    const h = insanTarafi();
+    $("sonucBas").textContent = h === null ? `${k} kazandı` : (String(state.winner) === h ? "Kazandın" : "Motor kazandı");
+    $("sonucAlt").textContent = `${adlar.length} hamlede · ${k} hedef sırasına ulaştı`;
+    son.classList.add("acik");
+  } else son.classList.remove("acik");
 }
 
-// -------------------------------------------------- ağ
+function oyuncuAdi(side) {
+  const h = insanTarafi();
+  if (h !== null) return String(side) === h ? ["Sen", ""] : ["Motor", seviyeAdi(seviye)];
+  if (izlenen && canliVeri) {
+    const aAltta = canliVeri.a_once;
+    const motorA = (side === 0) === aAltta;
+    return [motorA ? "A motoru" : "B motoru", motorA ? canliVeri.a : canliVeri.b];
+  }
+  if (macKosuyor || otomatik) return [`${(swapEng ? 1 - side : side) === 0 ? "A" : "B"} motoru`, motorFor(side)];
+  return [side === 0 ? "A" : "B", ""];
+}
+
+let dusunen = null;
+function raylar() {
+  // ekranda üstte olan taraf: normalde B (1), çevrikse A (0)
+  const ust = cevrik ? 0 : 1;
+  for (const [el, side] of [[$("rayUst"), ust], [$("rayAlt"), 1 - ust]]) {
+    const harf = side === 0 ? "A" : "B";
+    const [ad, alt] = oyuncuAdi(side);
+    const kalan = state.walls[side];
+    let stok = "";
+    for (let k = 0; k < 10; k++) stok += `<i class="${k < kalan ? "" : "bitti"}"></i>`;
+    const mesafe = state.dist[side];
+    el.className = "ray " + harf + (state.winner === null && state.side === side ? " sirada" : "") + (dusunen === side ? " dusunuyor" : "");
+    el.innerHTML =
+      `<span class="tas"></span>` +
+      `<span class="kim">${ad}<span class="rozet">sırada</span><small>${alt || (side === 0 ? "alttan yukarı çıkar" : "üstten aşağı iner")}</small></span>` +
+      `<span class="stok" title="${kalan} duvar kaldı">${stok}</span>` +
+      `<span class="mesafe" title="hedefe en kısa yol"><b>${mesafe ?? "–"}</b> adım</span>` +
+      `<span class="sure" id="sure${side}"><i></i></span>`;
+  }
+  teraziYaz();
+}
+
+function sureBaslat(side, spec) {
+  const m = /:(\d+)ms/.exec(spec);
+  const el = $("sure" + side);
+  if (!el) return;
+  const i = el.querySelector("i");
+  if (m) {
+    el.classList.remove("belirsiz");
+    i.style.transition = "none"; i.style.width = "0";
+    void i.offsetWidth;
+    i.style.transition = `width ${+m[1]}ms linear`; i.style.width = "100%";
+  } else el.classList.add("belirsiz");
+}
+
+function teraziYaz() {
+  const t = $("terazi"), alt = $("teraziAlt"), yazi = $("teraziYazi");
+  // A'nın payı ekranda A'nın tarafında: normalde altta
+  t.classList.toggle("ustA", cevrik);
+  if (degerA === null || izlenen) {
+    t.classList.add("bos"); alt.style.height = "50%";
+    yazi.textContent = "—"; yazi.style.bottom = "50%"; yazi.style.top = "";
+    return;
+  }
+  t.classList.remove("bos");
+  const p = Math.round(degerA * 100);
+  alt.style.height = p + "%";
+  const lider = p >= 50 ? `A %${p}` : `B %${100 - p}`;
+  yazi.textContent = lider;
+  if (cevrik) { yazi.style.top = `calc(${p}% - 8px)`; yazi.style.bottom = ""; }
+  else { yazi.style.bottom = p + "%"; yazi.style.top = ""; }
+}
+
+function durumYaz(hata) {
+  const d = $("durum"), y = $("durumYazi");
+  d.className = "";
+  if (hata) { d.classList.add("hata"); y.textContent = hata; return; }
+  if (!state) return;
+  const harf = state.side === 0 ? "A" : "B";
+  if (state.winner !== null) { d.classList.add(state.winner === 0 ? "A" : "B"); y.textContent = `${state.winner === 0 ? "A" : "B"} kazandı`; return; }
+  d.classList.add(harf);
+  if (izlenen) { d.classList.add("dusunuyor"); y.textContent = `Canlı izleniyor · ${izlenen.replace("__", " #")}`; return; }
+  if (mesgul) { d.classList.add("dusunuyor"); y.textContent = `${oyuncuAdi(state.side)[0]} düşünüyor`; return; }
+  y.textContent = benimSiram() ? "Sıra sende" : `Sıra ${harf}'da`;
+}
+
+function hamleListesi() {
+  const el = $("hamleler");
+  // açılışta kimin başladığını fen'den bilmiyoruz; ilk hamleyi oynayan
+  // taraf, ilk pozisyondaki side'dır: hamle sayısına göre geri hesapla
+  const ilkSide = ((state.side - adlar.length) % 2 + 2) % 2;
+  if (!adlar.length) { el.innerHTML = `<span class="bos" style="grid-column:1/-1">Henüz hamle yok.</span>`; $("hamleSay").textContent = ""; return; }
+  let html = "";
+  let k = 0, no = 1;
+  if (ilkSide === 1) { html += `<span class="no">1.</span><span class="h soluk">…</span>`; }
+  for (let i = 0; i < adlar.length; i++) {
+    const side = (ilkSide + i) % 2;
+    if (side === 0) html += `<span class="no">${no}.</span>`;
+    html += `<span class="h ${side === 0 ? "A" : "B"}${i === adlar.length - 1 ? " son" : ""}">${adlar[i]}</span>`;
+    if (side === 1) no++;
+    k++;
+  }
+  el.innerHTML = html;
+  el.scrollTop = el.scrollHeight;
+  $("hamleSay").textContent = `${adlar.length} yarım hamle`;
+}
+
+// ------------------------------------------------------------------ ağ
 async function get(path, params) {
-  const q = new URLSearchParams(params).toString();
-  const r = await fetch(path + "?" + q);
+  const r = await fetch(path + "?" + new URLSearchParams(params));
   const j = await r.json();
   if (j.error) throw new Error(j.error);
   return j;
 }
 
-async function refresh() {
-  state = await get("/api/state", { fen: history[history.length - 1] });
-  render();
+async function tazele() {
+  const yeni = await get("/api/state", { fen: gecmis[gecmis.length - 1] });
+  // iz: bir piyon yer değiştirdiyse eski karesi hafifçe işaretlenir
+  izKare = null;
+  if (state && oncekiPiyon) {
+    for (const s of [0, 1]) if (yeni.pawn[s] !== state.pawn[s]) izKare = state.pawn[s];
+  }
+  oncekiPiyon = yeni.pawn.slice();
+  state = yeni;
+  ciz();
 }
 
-function humanSide() { const v = $("you").value; return v === "none" ? null : v; }
-// Maç modunda her oyunda renkler değişiyor: aynı açılışı iki renkle de
-// oynamak, "A hep ilk oynuyor" avantajını ölçümden temizliyor.
-let swapEng = false;
-function engineFor(side) {
-  const s = swapEng ? 1 - side : side;
-  return s === 0 ? $("engA").value : $("engB").value;
+async function ekle(fen, ad) {
+  gecmis.push(fen);
+  if (ad) adlar.push(ad);
+  await tazele();
 }
 
-async function push(fen, name) {
-  history.push(fen);
-  if (name) names.push(name);
-  await refresh();
-}
-
-async function onCell(i) {
-  if (busy || !state || izlenen) return;
+function kareTik(i) {
+  if (mesgul || !state || izlenen) return;
   const m = state.moves.find(m => m.kind === "p" && m.to === i);
-  if (!m || !myTurnNow()) return;
-  await playMove(m);
+  if (m && benimSiram()) oyna(m);
 }
-
-async function onSlot(kind, slot) {
-  if (busy || !state || izlenen) return;
+function yuvaTik(kind, slot) {
+  if (mesgul || !state || izlenen) return;
   const m = state.moves.find(m => m.kind === kind && m.slot === slot);
-  if (!m || !myTurnNow()) return;
-  await playMove(m);
+  if (m && benimSiram()) oyna(m);
 }
 
-function myTurnNow() {
-  return humanSide() !== null && String(state.side) === humanSide() && state.winner === null;
-}
-
-async function playMove(m) {
-  preview.style.display = "none";
-  lastMoveSlot = m.kind === "p" ? null : { kind: m.kind, slot: m.slot };
+async function oyna(m) {
+  hayalet.style.display = "none";
+  yeniDuvar = m.kind === "p" ? null : { kind: m.kind, slot: m.slot };
   try {
     const r = await get("/api/apply", { fen: state.fen, move: m.id });
-    await push(r.fen, r.played);
-    await runEngines();
-  } catch (e) { showError(e); }
+    await ekle(r.fen, r.played);
+    await motorlar();
+  } catch (e) { durumYaz(e.message); }
 }
 
-async function runEngines() {
-  // Sırası motorda olduğu sürece oynat (izleyici modunda oyun sonuna kadar).
-  while (state.winner === null && !myTurnNow() && !izlenen) {
-    busy = true; render();
+async function motorlar() {
+  while (motorSirasi()) {
+    const side = state.side, spec = motorFor(side), once = state;
+    mesgul = true; dusunen = side; ciz(); sureBaslat(side, spec);
     try {
-      const spec = engineFor(state.side);
-      const r = await get("/api/bot", {
-        fen: state.fen,
-        engine: spec,
-        history: history.slice(-16).join(","),
-      });
-      lastMoveSlot = null;
-      const m = state.moves.find(x => x.id === r.id);
-      if (m && m.kind !== "p") lastMoveSlot = { kind: m.kind, slot: m.slot };
-      showBot(r);
-      busy = false;
-      await push(r.fen, r.name);
-    } catch (e) { busy = false; showError(e); return; }
-    if (humanSide() === null) {
+      const r = await get("/api/bot", { fen: state.fen, engine: spec, history: gecmis.slice(-16).join(",") });
+      const m = once.moves.find(x => x.id === r.id);
+      yeniDuvar = m && m.kind !== "p" ? { kind: m.kind, slot: m.slot } : null;
+      aramaGoster(r, once);
+      mesgul = false; dusunen = null;
+      if (izlenen) { ciz(); return; }
+      await ekle(r.fen, r.name);
+    } catch (e) { mesgul = false; dusunen = null; ciz(); durumYaz(e.message); return; }
+    if (insanTarafi() === null) {
       const d = +$("hiz").value;
       if (d > 0) await new Promise(res => setTimeout(res, d));
     }
   }
-  busy = false; render();
+  mesgul = false; dusunen = null; ciz();
 }
 
-function showBot(r) {
-  $("botinfo").innerHTML =
-    `<b>${r.name}</b> · ${r.engine} · ${r.info} · ${r.work.toLocaleString("tr")} iş · ${r.elapsed.toFixed(2)} sn`;
-  const tab = $("toptab"), body = tab.querySelector("tbody");
-  body.innerHTML = "";
+// ------------------------------------------------------------------ motorun gözünden
+function aramaGoster(r, once) {
+  arama = { r, once };
   if (r.top && r.top.length) {
-    tab.style.display = "";
-    for (const t of r.top) {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${t.name}</td><td class="num">${t.visits.toLocaleString("tr")}</td><td class="num">${(t.wr * 100).toFixed(1)}%</td>`;
-      body.appendChild(tr);
-    }
-  } else tab.style.display = "none";
-}
-
-function showError(e) {
-  $("status").innerHTML = `<span class="err">${e.message}</span>`;
-}
-
-// -------------------------------------------------- kontroller
-function fillEngines() {
-  buildEngines();
-  for (const sel of [$("engA"), $("engB")]) {
-    sel.innerHTML = "";
-    for (const [v, label] of ENGINES) {
-      const o = document.createElement("option");
-      o.value = v; o.textContent = label;
-      sel.appendChild(o);
-    }
+    const wr = r.top[0].wr;
+    degerA = once.side === 0 ? wr : 1 - wr;
   }
-  for (const sel of [$("engA"), $("engB")]) {
-    sel.value = "mcts:2000ms:t=0";
+  const harf = once.side === 0 ? "A" : "B";
+  $("aramaBilgi").innerHTML =
+    `<b>${r.name}</b> ${harf} için · ${r.work.toLocaleString("tr")} iterasyon · ${r.info}`;
+  $("aramaZaman").textContent = `${r.elapsed.toFixed(2).replace(".", ",")} sn`;
+  const ul = $("adaylar");
+  ul.innerHTML = "";
+  const top = (r.top || []).slice(0, 7);
+  const enCok = Math.max(1, ...top.map(t => t.visits));
+  for (const t of top) {
+    const li = document.createElement("li");
+    li.innerHTML =
+      `<span class="ad">${t.name}</span>` +
+      `<span class="cubuk" title="${t.visits.toLocaleString("tr")} ziyaret"><i style="width:${(100 * t.visits / enCok).toFixed(1)}%"></i></span>` +
+      `<span class="yuzde">%${(t.wr * 100).toFixed(1).replace(".", ",")}</span>`;
+    li.onmouseenter = () => isaretle(t.name, once);
+    li.onmouseleave = () => isaretle(null);
+    ul.appendChild(li);
+  }
+  teraziYaz();
+}
+
+function isaretle(ad, once) {
+  for (const k of kareler) k.classList.remove("isaret");
+  oneri.style.display = "none";
+  if (!ad || !once) return;
+  const m = once.moves.find(m => m.name === ad);
+  if (!m) return;
+  if (m.kind === "p") kareler[m.to].classList.add("isaret");
+  else {
+    const r = Math.floor(m.slot / WD), c = m.slot % WD;
+    if (m.kind === "h") yatayYer(oneri, r, c, 3); else dikeyYer(oneri, r, c, 3);
+    oneri.style.display = "block";
   }
 }
 
-async function newGame() {
-  izlenen = null;
-  history = [START];
-  names.length = 0;
-  lastMoveSlot = null;
-  $("botinfo").textContent = "henüz arama yok";
-  $("toptab").style.display = "none";
-  await refresh();
-  await runEngines();
+function aramaTemizle() {
+  arama = null; degerA = null;
+  $("aramaBilgi").textContent = "Motor hamle yapınca en çok düşündüğü seçenekler burada görünür. Üstüne gel, tahtada yerini gör.";
+  $("aramaZaman").textContent = "";
+  $("adaylar").innerHTML = "";
 }
 
-// -------------------------------------------------- canlı deney tablosu
-// deney.bat calisirken deney/ klasorunu okuyup her deneyin toplam skorunu
-// gosteriyor. Parcali kosuyor: bir deney N surece bolunmus oluyor, sunucu
-// tarafi onlari topluyor.
+// ------------------------------------------------------------------ oyun akışı
+async function yeniOyun() {
+  izlenen = null; canliVeri = null;
+  gecmis = [START]; adlar.length = 0;
+  yeniDuvar = null; izKare = null; oncekiPiyon = null; state = null;
+  aramaTemizle();
+  await tazele();
+  await motorlar();
+}
 
-/// Wilson %95 guven araligi. Normal yaklasim kucuk n'de %100'un ustune
-/// tasip "kazanma orani %105" gibi sacmaliklar uretiyor; Wilson uretmiyor.
+function durdurHepsi() {
+  macKosuyor = false; otomatik = false; swapEng = false;
+  $("macbas").disabled = false; $("macdur").disabled = true;
+}
+
+// ------------------------------------------------------------------ maç
+function skorYaz(not) {
+  $("skorA").textContent = skor.a;
+  $("skorB").textContent = skor.b;
+  const n = skor.a + skor.b;
+  $("skorOran").innerHTML = n
+    ? `%${(100 * skor.a / n).toFixed(0)} A<br>${skor.oyun}. oyun` + (skor.yarim ? `<br>${skor.yarim} bitmedi` : "")
+    : `${skor.oyun ? skor.oyun + ". oyun" : "henüz"}<br>oyun yok`;
+  if (not !== undefined) $("macNot").textContent = not;
+}
+
+// Değer yaprağı kullanan arama deterministik: standart açılıştan oynanan
+// 20 oyun tek bir oyunla aynı. Çeşitlilik rastgele açılıştan geliyor.
+async function rastgeleAcilis(plies) {
+  for (let k = 0; k < plies; k++) {
+    const st = await get("/api/state", { fen: gecmis[gecmis.length - 1] });
+    if (st.winner !== null || !st.moves.length) break;
+    const m = st.moves[Math.floor(Math.random() * st.moves.length)];
+    const r = await get("/api/apply", { fen: st.fen, move: m.id });
+    gecmis.push(r.fen); adlar.push(r.played);
+  }
+  await tazele();
+}
+
+async function macDongusu() {
+  skor = { a: 0, b: 0, yarim: 0, oyun: 0 };
+  const plies = +$("acilis").value;
+  while (macKosuyor) {
+    skor.oyun++;
+    // Her oyunda renk değişir; açılış iki oyunda bir yenilenir.
+    swapEng = skor.oyun % 2 === 0;
+    skorYaz(`Bu oyunda A motoru ${swapEng ? "üstten (B taşıyla)" : "alttan (A taşıyla)"} oynuyor.`);
+    gecmis = [START]; adlar.length = 0; yeniDuvar = null; izKare = null; state = null;
+    aramaTemizle();
+    await tazele();
+    if (plies > 0) await rastgeleAcilis(plies);
+    await motorlar();
+    if (!macKosuyor) break;
+    if (state.winner === null) skor.yarim++;
+    else if (state.winner === (swapEng ? 1 : 0)) skor.a++;
+    else skor.b++;
+    skorYaz();
+    await new Promise(res => setTimeout(res, 900));
+  }
+  swapEng = false;
+  skorYaz("Maç durdu.");
+}
+
+// ------------------------------------------------------------------ laboratuvar
 function wilson(a, n) {
   if (!n) return [0, 100];
   const p = a / n, z = 1.96, d = 1 + z * z / n;
-  const mer = (p + z * z / (2 * n)) / d;
-  const yay = z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d;
-  return [Math.max(0, mer - yay) * 100, Math.min(1, mer + yay) * 100];
+  const m = (p + z * z / (2 * n)) / d;
+  const y = z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d;
+  return [Math.max(0, m - y) * 100, Math.min(1, m + y) * 100];
 }
-
 function eloOf(p) {
-  if (p <= 0) return "-∞";
+  if (p <= 0) return "−∞";
   if (p >= 1) return "+∞";
   const e = -400 * Math.log10(1 / p - 1);
-  return (e >= 0 ? "+" : "") + e.toFixed(0);
+  return (e >= 0 ? "+" : "−") + Math.abs(e).toFixed(0);
 }
-
-let deneyTimer = null;
 
 async function deneyYenile() {
   let d;
   try { d = await get("/api/deney", {}); } catch (e) { return; }
   const list = d.deneyler || [];
-  if (!list.length) { $("deneykart").style.display = "none"; return; }
-  $("deneykart").style.display = "";
-
-  const bitenParca = list.reduce((t, x) => t + x.biten, 0);
-  const toplamParca = list.reduce((t, x) => t + x.parca, 0);
+  $("deneyKart").hidden = !list.length;
+  if (!list.length) return;
   const oyun = list.reduce((t, x) => t + x.a + x.b, 0);
-  $("deneynot").textContent =
-    `· ${oyun} oyun · ${bitenParca}/${toplamParca} parça bitti` +
-    (bitenParca === toplamParca ? " · TAMAM" : "");
-
-  let html = '<table id="deneytab"><thead><tr><th>deney</th><th class="num">skor</th>' +
-    '<th class="num">A %</th><th class="num">%95 aralık</th><th class="num">Elo</th></tr></thead><tbody>';
+  $("deneyNot").textContent = `${oyun} oyun`;
+  let html = `<table><thead><tr><th>deney</th><th class="s">skor</th><th class="s">A</th><th class="s">%95 aralık</th><th class="s">Elo</th></tr></thead><tbody>`;
   for (const x of list) {
-    const n = x.a + x.b;
-    const p = n ? x.a / n : 0;
+    const n = x.a + x.b, p = n ? x.a / n : 0;
     const [lo, hi] = wilson(x.a, n);
-    // Aralik 50'yi kesiyorsa sonuc henuz bir sey soylemiyor.
-    const kesin = n > 0 && (hi < 50 || lo > 50);
-    const renk = !kesin ? "var(--dim)" : (p > 0.5 ? "#5ec98a" : "#e06c6c");
-    const ad = x.ad.replace(/^\d+-/, "").replace(/-/g, " ");
-    html += `<tr><td>${ad}${x.biten < x.parca ? " <span style='color:var(--dim)'>…</span>" : ""}</td>` +
-      `<td class="num">${x.a}-${x.b}</td>` +
-      `<td class="num" style="color:${renk};font-weight:600">${n ? (p * 100).toFixed(1) : "—"}</td>` +
-      `<td class="num" style="color:var(--dim)">${n ? lo.toFixed(0) + "–" + hi.toFixed(0) : "—"}</td>` +
-      `<td class="num" style="color:${renk}">${n ? eloOf(p) : "—"}</td></tr>`;
+    // Aralık %50'yi kesiyorsa sonuç henüz bir şey söylemiyor.
+    const sinif = n && lo > 50 ? "kesin-arti" : n && hi < 50 ? "kesin-eksi" : "soluk";
+    const ad = x.ad.replace(/^\d+-/, "").replace(/[-_]/g, " ");
+    html += `<tr><td>${ad}${x.biten < x.parca ? ` <span class="soluk">· sürüyor</span>` : ""}</td>` +
+      `<td class="s mono">${x.a}–${x.b}</td>` +
+      `<td class="s mono ${sinif}">${n ? "%" + (p * 100).toFixed(1).replace(".", ",") : "—"}</td>` +
+      `<td class="s mono soluk">${n ? lo.toFixed(0) + "–" + hi.toFixed(0) : "—"}</td>` +
+      `<td class="s mono ${sinif}">${n ? eloOf(p) : "—"}</td></tr>`;
   }
-  html += "</tbody></table>";
-  $("deneywrap").innerHTML = html;
+  $("deneyListe").innerHTML = html + "</tbody></table>";
 }
 
-function deneyIzle() {
-  if (deneyTimer) clearInterval(deneyTimer);
-  deneyYenile();
-  deneyTimer = setInterval(deneyYenile, 5000);
-  canliYenile();
-  setInterval(canliYenile, 1000);
-}
-
-// -------------------------------------------------- canlı maç izleme
-// `gedik match` GEDIK_CANLI ile çalışıyorsa (tools/sprt.py bunu her parça
-// için açar) oynanan oyun deney/*.canli dosyasına yazılır. "İzle" tahtayı
-// o oyuna bağlar; izlerken motorlar ve tıklamalar devre dışı.
-let izlenen = null;
-let izlenenHamle = -1;
-
+// `gedik match` GEDIK_CANLI ile çalışırken (tools/sprt.py açar) oyun
+// deney/*.canli dosyasına yazılır. "İzle" tahtayı o oyuna bağlar.
+let canliVeri = null;
 let canliMesgul = false;
 async function canliYenile() {
   if (canliMesgul) return;
   canliMesgul = true;
   try { await canliYenile1(); } finally { canliMesgul = false; }
 }
-
 async function canliYenile1() {
   let d;
   try { d = await get("/api/canli", {}); } catch (e) { return; }
   const list = d.oyunlar || [];
-  $("canlikart").style.display = list.length || izlenen ? "" : "none";
-
-  // İskelet (satırlar ve düğmeler) yalnız oyun listesi ya da izlenen oyun
-  // değişince kurulur; her hamlede sadece yazılar güncellenir. Her saniye
+  $("canliKart").hidden = !list.length && !izlenen;
+  // İskelet yalnız liste ya da izlenen değişince kurulur; her saniye
   // innerHTML yazmak düğmeyi tıklamanın ortasında yok ediyordu.
+  const wrap = $("canliListe");
   const anahtar = list.map(o => o.ad).join("|") + "#" + izlenen;
-  const wrap = $("canliwrap");
   if (wrap.dataset.anahtar !== anahtar) {
     wrap.dataset.anahtar = anahtar;
     wrap.innerHTML = list.map((o, i) =>
-      `<div class="kv" style="justify-content:space-between;gap:8px;margin:4px 0">` +
-      `<span id="canli${i}"></span>` +
+      `<div class="canli-satir"><span class="canli-isik"></span><span class="yazi" id="canli${i}"></span>` +
       (izlenen === o.ad
-        ? `<button onclick="canliBirak()">Bırak</button>`
-        : `<button onclick="canliIzle('${o.ad}')">İzle</button>`) +
-      `</div>` +
-      (izlenen === o.ad
-        ? `<div id="canlidetay" style="color:var(--dim);margin-bottom:6px"></div>` : "")
-    ).join("");
+        ? `<button class="dugme" data-birak>Bırak</button>`
+        : `<button class="dugme" data-izle="${o.ad}">İzle</button>`) + `</div>` +
+      (izlenen === o.ad ? `<div class="canli-detay" id="canliDetay"></div>` : "")
+    ).join("") || `<div class="bos">Şu an oynanan maç yok.</div>`;
+    wrap.querySelectorAll("[data-izle]").forEach(b => b.onclick = () => canliIzle(b.dataset.izle));
+    wrap.querySelectorAll("[data-birak]").forEach(b => b.onclick = canliBirak);
   }
-
   for (const [i, o] of list.entries()) {
     const v = o.veri;
-    const ad = o.ad.replace(/__/, " #");
-    const durum = v.bitti ? `bitti: ${v.bitti === "-" ? "bitmedi" : v.bitti + " kazandı"}`
-      : `${v.hamleler.length}. hamle`;
+    const durum = v.bitti ? (v.bitti === "-" ? "bitmedi" : `${v.bitti} kazandı`) : `${v.hamleler.length}. hamle`;
     const el = $("canli" + i);
-    if (el) el.innerHTML = `<b>${ad}</b> · oyun ${v.oyun} · bu parçada ${v.skor[0]}-${v.skor[1]} · ${durum}`;
+    if (el) el.innerHTML = `<b>${o.ad.replace("__", " #")}</b><br><span>${v.oyun}. oyun · bu parçada ${v.skor[0]}–${v.skor[1]} · ${durum}</span>`;
     if (izlenen !== o.ad) continue;
-    const det = $("canlidetay");
-    if (det) det.innerHTML = `A = ${v.a}<br>B = ${v.b}<br>alttan başlayan: ${v.a_once ? "A" : "B"}`;
+    canliVeri = v;
+    const det = $("canliDetay");
+    if (det) det.innerHTML = `A = ${v.a}<br>B = ${v.b}<br>A motoru ${v.a_once ? "alttan" : "üstten"} oynuyor`;
     if (v.hamleler.length !== izlenenHamle || v.bitti) {
       izlenenHamle = v.hamleler.length;
-      history = v.fenler.slice();
-      names.length = 0;
-      names.push(...v.hamleler);
-      lastMoveSlot = null;
-      try { await refresh(); } catch (e) {}
+      gecmis = v.fenler.slice();
+      adlar.length = 0; adlar.push(...v.hamleler);
+      yeniDuvar = null;
+      try { await tazele(); } catch (e) {}
     }
   }
 }
-
 function canliIzle(ad) {
-  izlenen = ad;
-  izlenenHamle = -1;
-  $("botinfo").textContent = "canlı maç izleniyor";
-  $("toptab").style.display = "none";
+  durdurHepsi();
+  izlenen = ad; izlenenHamle = -1; state = null; oncekiPiyon = null;
+  aramaTemizle();
+  $("aramaBilgi").textContent = "Canlı maçlarda arama ayrıntısı kaydedilmiyor; tahtayı ve hamleleri izle.";
   canliYenile();
 }
-
 function canliBirak() {
-  izlenen = null;
-  newGame();
+  izlenen = null; canliVeri = null;
+  yeniOyun().catch(e => durumYaz(e.message));
 }
 
-// -------------------------------------------------- maç modu
-let macKosuyor = false;
-let skor = { a: 0, b: 0, yarim: 0, oyun: 0 };
-
-function skorYaz(ek) {
-  const oynanan = skor.a + skor.b;
-  const oran = oynanan ? (100 * skor.a / oynanan).toFixed(1) + "%" : "—";
-  $("skor").innerHTML =
-    `<b>A ${skor.a} – ${skor.b} B</b> · ${skor.oyun}. oyun · A kazanma ${oran}` +
-    (skor.yarim ? ` · ${skor.yarim} bitmedi` : "") +
-    (ek ? `<br>${ek}` : "");
-}
-
-/// Rastgele açılış: ilk N yarım hamleyi legal hamleler arasından seçiyor.
-/// Değer yaprağı kullanan arama deterministik olduğu için standart
-/// açılıştan oynanan 20 oyun tek bir oyunla aynı sonucu verir — çeşitlilik
-/// buradan geliyor.
-async function rastgeleAcilis(plies) {
-  for (let k = 0; k < plies; k++) {
-    const st = await get("/api/state", { fen: history[history.length - 1] });
-    if (st.winner !== null || !st.moves.length) break;
-    const m = st.moves[Math.floor(Math.random() * st.moves.length)];
-    const r = await get("/api/apply", { fen: st.fen, move: m.id });
-    history.push(r.fen); names.push(r.played);
-  }
-  await refresh();
-}
-
-async function macDongusu() {
-  $("you").value = "none";
-  skor = { a: 0, b: 0, yarim: 0, oyun: 0 };
-  const plies = +$("acilis").value;
-  while (macKosuyor) {
-    skor.oyun++;
-    // Her oyunda renk değişiyor; açılış her iki oyunda bir yenileniyor.
-    swapEng = skor.oyun % 2 === 0;
-    skorYaz(`renkler: A motoru = ${swapEng ? "üstteki B" : "alttaki A"}`);
-    history = [START]; names.length = 0; lastMoveSlot = null;
-    await refresh();
-    if (plies > 0) await rastgeleAcilis(plies);
-    await runEngines();
-    if (!macKosuyor) break;
-    if (state.winner === null) skor.yarim++;
-    else if (state.winner === (swapEng ? 1 : 0)) skor.a++;
-    else skor.b++;
-    skorYaz();
-    await new Promise(res => setTimeout(res, 500));
-  }
-  swapEng = false;
-  skorYaz("durdu");
-}
-
-$("macbas").onclick = () => {
-  if (macKosuyor) return;
-  macKosuyor = true;
-  macDongusu().catch(e => { macKosuyor = false; showError(e); });
-};
-$("macdur").onclick = () => { macKosuyor = false; skorYaz("durduruluyor…"); };
-
-$("new").onclick = () => { macKosuyor = false; newGame().catch(showError); };
-$("undo").onclick = async () => {
-  if (busy) return;
-  // İnsan hamlesine kadar geri sar (motor cevabını da al).
-  const back = humanSide() === null ? 1 : 2;
-  for (let k = 0; k < back && history.length > 1; k++) { history.pop(); names.pop(); }
-  lastMoveSlot = null;
-  await refresh();
-};
-$("flip").onclick = () => { flipped = !flipped; relayout(); labels(); render(); };
-$("hint").onclick = async () => {
-  if (busy || !state || state.winner !== null) return;
-  busy = true; render();
-  try {
-    const r = await get("/api/bot", {
-      fen: state.fen,
-      engine: engineFor(state.side),
-      history: history.slice(-16).join(","),
-    });
-    showBot(r);
-  } catch (e) { showError(e); }
-  busy = false; render();
-};
-$("you").onchange = () => newGame().catch(showError);
-$("load").onclick = async () => {
-  const f = $("fen").value.trim();
-  try {
-    const s = await get("/api/state", { fen: f });
-    history = [s.fen]; names.length = 0; lastMoveSlot = null;
-    state = s; render();
-    await runEngines();
-  } catch (e) { showError(e); }
-};
-$("copy").onclick = () => navigator.clipboard.writeText($("fen").value);
-
-async function loadCores() {
-  try { CORES = (await get("/api/cores", {})).cores || 1; } catch (e) { CORES = 1; }
-}
-
-// Turnuva sonuclari: hangi motor ne kadar guclu.
-async function loadRatings() {
+async function gucYukle() {
   let r;
   try { r = await get("/api/ratings", {}); } catch (e) { r = { engines: [] }; }
-  const wrap = $("elowrap");
+  const wrap = $("gucListe");
   if (!r.engines || !r.engines.length) {
-    wrap.innerHTML = 'Turnuva sonucu yok. Uretmek icin:<br>' +
-      '<code style="font-size:11px">quoridor tournament 4 mcts:20000 ab:300ms</code>';
+    wrap.innerHTML = `Turnuva sonucu yok. Üretmek için: <code>gedik tournament 4 mcts:20000 ab:300ms</code>`;
     return;
   }
   const elos = r.engines.map(e => e.elo);
-  const lo = Math.min(...elos), hi = Math.max(...elos), span = Math.max(1, hi - lo);
-  let html = '<table id="elotab"><thead><tr><th></th><th>motor</th>' +
-             '<th class="num">Elo</th><th class="num">skor</th></tr></thead><tbody>';
+  const lo = Math.min(...elos), span = Math.max(1, Math.max(...elos) - lo);
+  let html = `<table id="gucTablo"><thead><tr><th>motor</th><th class="s">Elo</th><th class="s">skor</th></tr></thead><tbody>`;
   for (const e of r.engines) {
-    const w = Math.round(6 + 94 * (e.elo - lo) / span);
-    html += `<tr>
-      <td class="rank">${e.rank}</td>
-      <td class="eng" data-spec="${e.spec}" title="tiklayinca iki tarafa da atanir">
-        ${e.spec}<div class="bar" style="width:${w}%"></div></td>
-      <td class="num">${e.elo > 0 ? "+" : ""}${e.elo} <span style="opacity:.5">±${e.err}</span></td>
-      <td class="num">${(e.score * 100).toFixed(0)}%</td></tr>`;
+    html += `<tr class="sec" data-spec="${e.spec}" title="Motor maçında iki tarafa da ata">` +
+      `<td class="mono">${e.spec}<div class="elobar" style="width:${Math.round(6 + 94 * (e.elo - lo) / span)}%"></div></td>` +
+      `<td class="s mono">${e.elo > 0 ? "+" : ""}${e.elo} <span class="soluk">±${e.err}</span></td>` +
+      `<td class="s mono">%${(e.score * 100).toFixed(0)}</td></tr>`;
   }
-  html += "</tbody></table>";
-  wrap.innerHTML = html;
-  $("elonote").textContent = ` · ${r.engines[0].games} maç/motor`;
-  wrap.insertAdjacentHTML("beforeend",
-    '<div style="color:var(--dim);font-size:11px;margin-top:8px;line-height:1.45">' +
-    'Sabit iterasyon bütçeleriyle ölçüldü. Pratikte en güçlü ayar süre bütçeli ' +
-    've tüm çekirdekleri kullanan seçenek: <b>MCTS 3 sn</b>. Alt sıradakiler ' +
-    'ablasyon — <code>mctsu</code> policy prior yok, <code>mctsr</code> rastgele ' +
-    'rollout, <code>ab</code> alpha-beta baseline.</div>');
-  wrap.querySelectorAll("td.eng").forEach(td => {
-    td.onclick = () => {
-      const spec = td.dataset.spec;
-      for (const sel of [$("engA"), $("engB")]) {
-        if (![...sel.options].some(o => o.value === spec)) {
-          const o = document.createElement("option");
-          o.value = spec; o.textContent = spec;
-          sel.appendChild(o);
-        }
-        sel.value = spec;
-      }
-    };
+  wrap.className = "";
+  wrap.innerHTML = html + `</tbody></table><div class="not">Sabit iterasyonla ölçüldü. Bir satıra tıklarsan o motor Motor maçı sekmesinde iki tarafa da atanır.</div>`;
+  $("gucNot").textContent = `motor başına ${r.engines[0].games} maç`;
+  wrap.querySelectorAll("tr.sec").forEach(tr => tr.onclick = () => {
+    for (const sel of [$("engA"), $("engB")]) {
+      if (![...sel.options].some(o => o.value === tr.dataset.spec)) sel.add(new Option(tr.dataset.spec, tr.dataset.spec));
+      sel.value = tr.dataset.spec;
+    }
+    sekmeAc("mac");
   });
 }
 
-fillEngines();
-build();
-loadCores().then(fillEngines).then(loadRatings).catch(() => {});
-deneyIzle();
-newGame().catch(showError);
+// ------------------------------------------------------------------ kontroller
+function seviyeCiz() {
+  const el = $("seviyeler");
+  el.innerHTML = "";
+  for (const s of SEVIYELER) {
+    const b = document.createElement("button");
+    b.setAttribute("aria-pressed", String(s.spec === seviye));
+    b.innerHTML = `<b>${s.ad}</b><span>${s.not}</span><i style="--g:${s.g}%"></i>`;
+    b.onclick = () => {
+      seviye = s.spec; seviyeCiz();
+      if (state) ciz();
+      // sıra motordaysa yeni seviyeyle hemen oynasın
+      if (!mesgul) motorlar();
+    };
+    el.appendChild(b);
+  }
+  for (const sel of [$("engA"), $("engB")]) {
+    const once = sel.value;
+    sel.innerHTML = "";
+    for (const s of SEVIYELER) sel.add(new Option(`${s.ad} · ${s.not}`, s.spec));
+    sel.value = once && [...sel.options].some(o => o.value === once) ? once : "mcts:2000ms:t=0";
+  }
+}
+
+function sekmeAc(ad) {
+  sekme = ad;
+  document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.sekme === ad)));
+  document.querySelectorAll("[data-panel]").forEach(p => p.hidden = p.dataset.panel !== ad);
+  if (state) ciz();
+  // Oyna sekmesine dönüldüğünde sıra motordaysa oynasın.
+  if (ad === "oyna" && !mesgul && !izlenen && !macKosuyor && !otomatik) motorlar();
+}
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => sekmeAc(b.dataset.sekme));
+
+document.querySelectorAll("#renkSecim button").forEach(b => b.onclick = () => {
+  renk = b.dataset.renk;
+  document.querySelectorAll("#renkSecim button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  cevrik = renk === "1"; $("cevir").setAttribute("aria-pressed", String(cevrik)); yeniden();
+  durdurHepsi();
+  yeniOyun().catch(e => durumYaz(e.message));
+});
+
+$("yeni").onclick = () => { durdurHepsi(); yeniOyun().catch(e => durumYaz(e.message)); };
+$("geri").onclick = async () => {
+  if (mesgul || izlenen) return;
+  // insan hamlesine kadar geri sar (motorun cevabıyla birlikte)
+  const geri = insanTarafi() === null ? 1 : (benimSiram() ? 2 : 1);
+  for (let k = 0; k < geri && gecmis.length > 1; k++) { gecmis.pop(); adlar.pop(); }
+  yeniDuvar = null; izKare = null; oncekiPiyon = null;
+  await tazele();
+};
+$("ipucu").onclick = async () => {
+  if (mesgul || !state || state.winner !== null || izlenen) return;
+  const once = state;
+  mesgul = true; dusunen = state.side; ciz(); sureBaslat(state.side, motorFor(state.side));
+  try {
+    const r = await get("/api/bot", { fen: state.fen, engine: motorFor(state.side), history: gecmis.slice(-16).join(",") });
+    aramaGoster(r, once);
+    isaretle(r.name, once);
+    setTimeout(() => isaretle(null), 2500);
+  } catch (e) { durumYaz(e.message); }
+  mesgul = false; dusunen = null; ciz();
+};
+$("cevir").onclick = () => { cevrik = !cevrik; $("cevir").setAttribute("aria-pressed", String(cevrik)); yeniden(); };
+$("yolCip").onclick = () => { yollarAcik = !yollarAcik; $("yolCip").setAttribute("aria-pressed", String(yollarAcik)); ciz(); };
+
+$("macbas").onclick = () => {
+  if (macKosuyor) return;
+  izlenen = null; otomatik = false; macKosuyor = true;
+  $("macbas").disabled = true; $("macdur").disabled = false;
+  macDongusu().catch(e => { durdurHepsi(); durumYaz(e.message); });
+};
+$("macdur").onclick = () => { durdurHepsi(); skorYaz("Durduruluyor, oynanan oyun bitince durur."); };
+$("tekOyun").onclick = async () => {
+  durdurHepsi(); izlenen = null; otomatik = true;
+  gecmis = [START]; adlar.length = 0; yeniDuvar = null; izKare = null; state = null;
+  aramaTemizle();
+  try {
+    await tazele();
+    const plies = +$("acilis").value;
+    if (plies > 0) await rastgeleAcilis(plies);
+    await motorlar();
+  } catch (e) { durumYaz(e.message); }
+  otomatik = false; ciz();
+};
+
+$("fenYukle").onclick = async () => {
+  try {
+    const s = await get("/api/state", { fen: $("fen").value.trim() });
+    durdurHepsi(); izlenen = null;
+    gecmis = [s.fen]; adlar.length = 0; yeniDuvar = null; izKare = null; oncekiPiyon = null;
+    state = s; aramaTemizle(); ciz();
+    await motorlar();
+  } catch (e) { durumYaz(e.message); }
+};
+$("fenKopya").onclick = async () => {
+  try { await navigator.clipboard.writeText($("fen").value); $("fenKopya").textContent = "Kopyalandı"; }
+  catch (e) { $("fenKopya").textContent = "Kopyalanamadı"; }
+  setTimeout(() => $("fenKopya").textContent = "Kopyala", 1500);
+};
+
+window.addEventListener("resize", () => { if (state) ciz(); });
+
+// ------------------------------------------------------------------ başlangıç
+seviyeleriKur();
+seviyeCiz();
+kur();
+skorYaz();
+(async () => {
+  try { CORES = (await get("/api/cores", {})).cores || 1; } catch (e) {}
+  // çekirdek sayısı gelince iterasyonlu seviyelerin spec'i değişir
+  const eskiIndeks = SEVIYELER.findIndex(s => s.spec === seviye);
+  seviyeleriKur();
+  if (eskiIndeks >= 0) seviye = SEVIYELER[eskiIndeks].spec;
+  seviyeCiz();
+  gucYukle();
+})();
+deneyYenile(); setInterval(deneyYenile, 5000);
+canliYenile(); setInterval(canliYenile, 1000);
+yeniOyun().catch(e => durumYaz(e.message));
 </script>
 </body>
 </html>
