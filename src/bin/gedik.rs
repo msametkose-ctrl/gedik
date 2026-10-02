@@ -283,15 +283,23 @@ fn play_from(
     let mut pos = *start;
     let mut fenler = vec![to_fen(&pos)];
     let mut hamleler: Vec<String> = Vec::new();
+    // Web arayüzü motora son 16 pozisyonu veriyor, motor tekrara dönen
+    // hamleleri cezalandırıyor. Maç eskiden geçmiş vermiyordu: iki taraf
+    // da duvarı varken birbirini bekleyince 400 hamle sağ-sol yapıyordu
+    // (2,5 sn maçında 26 dakikalık bitmeyen oyun). Ölçüm gerçek oyunla
+    // aynı koşulda olsun diye burada da veriyoruz.
+    let mut gecmis: Vec<u64> = vec![pos.hash];
     izle(&fenler, &hamleler);
     while pos.winner().is_none() && pos.ply < MAX_PLY {
         // side 0 her zaman alttan başlayan taraf.
         let a_turn = (pos.side == 0) == a_is_first;
         let e = if a_turn { &mut *a } else { &mut *b };
-        let mv = e.choose(&pos).mv;
+        let son = &gecmis[gecmis.len().saturating_sub(16)..];
+        let mv = e.choose_with_history(&pos, son).mv;
         let Some(mv) = mv else { return None };
         hamleler.push(move_name(&pos, mv));
         pos.make(mv);
+        gecmis.push(pos.hash);
         fenler.push(to_fen(&pos));
         izle(&fenler, &hamleler);
     }
