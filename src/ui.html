@@ -197,6 +197,11 @@
     <div id="deneywrap" style="color:var(--dim);font-size:12px"></div>
   </div>
 
+  <div class="card" id="canlikart" style="display:none">
+    <h2>Canlı maçlar</h2>
+    <div id="canliwrap" style="font-size:12px"></div>
+  </div>
+
   <div class="card">
     <h2>Motor gücü <span id="elonote" style="text-transform:none;letter-spacing:0"></span></h2>
     <div id="elowrap" style="color:var(--dim);font-size:12px">yükleniyor…</div>
@@ -430,14 +435,14 @@ async function push(fen, name) {
 }
 
 async function onCell(i) {
-  if (busy || !state) return;
+  if (busy || !state || izlenen) return;
   const m = state.moves.find(m => m.kind === "p" && m.to === i);
   if (!m || !myTurnNow()) return;
   await playMove(m);
 }
 
 async function onSlot(kind, slot) {
-  if (busy || !state) return;
+  if (busy || !state || izlenen) return;
   const m = state.moves.find(m => m.kind === kind && m.slot === slot);
   if (!m || !myTurnNow()) return;
   await playMove(m);
@@ -459,7 +464,7 @@ async function playMove(m) {
 
 async function runEngines() {
   // Sırası motorda olduğu sürece oynat (izleyici modunda oyun sonuna kadar).
-  while (state.winner === null && !myTurnNow()) {
+  while (state.winner === null && !myTurnNow() && !izlenen) {
     busy = true; render();
     try {
       const spec = engineFor(state.side);
@@ -519,6 +524,7 @@ function fillEngines() {
 }
 
 async function newGame() {
+  izlenen = null;
   history = [START];
   names.length = 0;
   lastMoveSlot = null;
@@ -590,6 +596,81 @@ function deneyIzle() {
   if (deneyTimer) clearInterval(deneyTimer);
   deneyYenile();
   deneyTimer = setInterval(deneyYenile, 5000);
+  canliYenile();
+  setInterval(canliYenile, 1000);
+}
+
+// -------------------------------------------------- canlı maç izleme
+// `gedik match` GEDIK_CANLI ile çalışıyorsa (tools/sprt.py bunu her parça
+// için açar) oynanan oyun deney/*.canli dosyasına yazılır. "İzle" tahtayı
+// o oyuna bağlar; izlerken motorlar ve tıklamalar devre dışı.
+let izlenen = null;
+let izlenenHamle = -1;
+
+let canliMesgul = false;
+async function canliYenile() {
+  if (canliMesgul) return;
+  canliMesgul = true;
+  try { await canliYenile1(); } finally { canliMesgul = false; }
+}
+
+async function canliYenile1() {
+  let d;
+  try { d = await get("/api/canli", {}); } catch (e) { return; }
+  const list = d.oyunlar || [];
+  $("canlikart").style.display = list.length || izlenen ? "" : "none";
+
+  // İskelet (satırlar ve düğmeler) yalnız oyun listesi ya da izlenen oyun
+  // değişince kurulur; her hamlede sadece yazılar güncellenir. Her saniye
+  // innerHTML yazmak düğmeyi tıklamanın ortasında yok ediyordu.
+  const anahtar = list.map(o => o.ad).join("|") + "#" + izlenen;
+  const wrap = $("canliwrap");
+  if (wrap.dataset.anahtar !== anahtar) {
+    wrap.dataset.anahtar = anahtar;
+    wrap.innerHTML = list.map((o, i) =>
+      `<div class="kv" style="justify-content:space-between;gap:8px;margin:4px 0">` +
+      `<span id="canli${i}"></span>` +
+      (izlenen === o.ad
+        ? `<button onclick="canliBirak()">Bırak</button>`
+        : `<button onclick="canliIzle('${o.ad}')">İzle</button>`) +
+      `</div>` +
+      (izlenen === o.ad
+        ? `<div id="canlidetay" style="color:var(--dim);margin-bottom:6px"></div>` : "")
+    ).join("");
+  }
+
+  for (const [i, o] of list.entries()) {
+    const v = o.veri;
+    const ad = o.ad.replace(/__/, " #");
+    const durum = v.bitti ? `bitti: ${v.bitti === "-" ? "bitmedi" : v.bitti + " kazandı"}`
+      : `${v.hamleler.length}. hamle`;
+    const el = $("canli" + i);
+    if (el) el.innerHTML = `<b>${ad}</b> · oyun ${v.oyun} · bu parçada ${v.skor[0]}-${v.skor[1]} · ${durum}`;
+    if (izlenen !== o.ad) continue;
+    const det = $("canlidetay");
+    if (det) det.innerHTML = `A = ${v.a}<br>B = ${v.b}<br>alttan başlayan: ${v.a_once ? "A" : "B"}`;
+    if (v.hamleler.length !== izlenenHamle || v.bitti) {
+      izlenenHamle = v.hamleler.length;
+      history = v.fenler.slice();
+      names.length = 0;
+      names.push(...v.hamleler);
+      lastMoveSlot = null;
+      try { await refresh(); } catch (e) {}
+    }
+  }
+}
+
+function canliIzle(ad) {
+  izlenen = ad;
+  izlenenHamle = -1;
+  $("botinfo").textContent = "canlı maç izleniyor";
+  $("toptab").style.display = "none";
+  canliYenile();
+}
+
+function canliBirak() {
+  izlenen = null;
+  newGame();
 }
 
 // -------------------------------------------------- maç modu

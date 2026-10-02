@@ -15,6 +15,7 @@
 //! | `GET /api/ratings` | turnuva sonuçları ve Elo tablosu |
 //! | `GET /api/cores` | makinedeki çekirdek sayısı
 //! | `GET /api/deney` | `deney/` klasöründeki maçların canlı toplamı |
+//! | `GET /api/canli` | `deney/*.canli`: oynanmakta olan maç oyunları |
 
 use crate::bitboard::WSLOTS;
 use crate::board::Position;
@@ -81,6 +82,10 @@ fn handle(mut stream: TcpStream) -> std::io::Result<()> {
             let body = deney_ozet();
             respond(&mut stream, 200, "application/json; charset=utf-8", &body)
         }
+        "/api/canli" => {
+            let body = canli_ozet();
+            respond(&mut stream, 200, "application/json; charset=utf-8", &body)
+        }
         "/api/cores" => {
             let body = format!("{{\"cores\": {}}}", crate::engine::default_threads());
             respond(&mut stream, 200, "application/json; charset=utf-8", &body)
@@ -124,6 +129,38 @@ fn respond(
     stream.write_all(head.as_bytes())?;
     stream.write_all(body.as_bytes())?;
     stream.flush()
+}
+
+/// `deney/*.canli`: maç sürerken `gedik match`'in (GEDIK_CANLI ile) yazdığı
+/// oyun halleri. Dosyalar zaten JSON; olduğu gibi bir listeye koyuyoruz.
+/// 30 dakikadan eski dosyalar biten maçlardan kalmadır, listelenmez.
+fn canli_ozet() -> String {
+    let mut parcalar = Vec::new();
+    if let Ok(dir) = std::fs::read_dir("deney") {
+        let mut yollar: Vec<_> = dir.filter_map(|e| e.ok().map(|e| e.path())).collect();
+        yollar.sort();
+        for yol in yollar {
+            if yol.extension().and_then(|e| e.to_str()) != Some("canli") {
+                continue;
+            }
+            let yas = std::fs::metadata(&yol)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .map_or(u64::MAX, |d| d.as_secs());
+            if yas > 30 * 60 {
+                continue;
+            }
+            let Ok(veri) = std::fs::read_to_string(&yol) else { continue };
+            let ad = yol.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+            parcalar.push(format!(
+                r#"{{"ad":"{}","yas":{yas},"veri":{}}}"#,
+                escape(ad),
+                veri.trim()
+            ));
+        }
+    }
+    format!(r#"{{"oyunlar":[{}]}}"#, parcalar.join(","))
 }
 
 /// `deney/` klasöründeki maç çıktılarını okuyup deney başına toplar.

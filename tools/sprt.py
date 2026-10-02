@@ -152,6 +152,8 @@ def main():
             [args.exe, "match", args.a, args.b, str(cift_basina),
              str(args.seed + i * 100003), str(args.acilis)],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            # Web arayüzünde "Canlı maçlar" kartı bu dosyayı izler.
+            env={**os.environ, "GEDIK_CANLI": yol[:-len(".txt")] + ".canli"},
             text=True, encoding="utf-8", errors="replace",
         )
         surecler.append(p)

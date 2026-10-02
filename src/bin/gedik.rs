@@ -2,7 +2,7 @@
 use gedik::heuristics::{candidate_moves, playout, Rng};
 use gedik::engine::Engine;
 use gedik::mcts::Mcts;
-use gedik::notation::{board_string, move_name, parse_move};
+use gedik::notation::{board_string, move_name, parse_move, to_fen};
 use gedik::perft::{divide, perft};
 use gedik::search::Searcher;
 use std::io::{self, BufRead, Write};
@@ -213,15 +213,87 @@ fn random_opening(seed: u64, plies: usize) -> Position {
     }
 }
 
-fn play_from(start: &Position, a: &mut Engine, b: &mut Engine, a_is_first: bool) -> Option<usize> {
+/// Canlı izleme: `GEDIK_CANLI` ortam değişkeni bir dosya yolu ise, oynanan
+/// oyunun hali her hamleden sonra o dosyaya JSON olarak yazılır. Web
+/// arayüzü (`/api/canli`) `deney/*.canli` dosyalarını okuyup tahtada
+/// gösterir. Değişken yoksa hiçbir şey yazılmaz, maç eskisi gibi.
+struct Canli {
+    yol: String,
+    bas: String,
+}
+
+impl Canli {
+    fn yeni(spec_a: &str, spec_b: &str) -> Option<Canli> {
+        let yol = std::env::var("GEDIK_CANLI").ok().filter(|y| !y.is_empty())?;
+        let bas = format!(
+            r#""a":"{}","b":"{}""#,
+            json_kac(spec_a),
+            json_kac(spec_b)
+        );
+        Some(Canli { yol, bas })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn yaz(
+        &self,
+        oyun: usize,
+        toplam: usize,
+        a_once: bool,
+        skor: (usize, usize),
+        fenler: &[String],
+        hamleler: &[String],
+        bitti: Option<&str>,
+    ) {
+        let liste = |v: &[String]| {
+            v.iter()
+                .map(|x| format!("\"{}\"", json_kac(x)))
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        let govde = format!(
+            r#"{{{},"oyun":{oyun},"toplam":{toplam},"a_once":{a_once},"skor":[{},{}],"bitti":{},"fenler":[{}],"hamleler":[{}]}}"#,
+            self.bas,
+            skor.0,
+            skor.1,
+            bitti.map(|b| format!("\"{b}\"")).unwrap_or_else(|| "null".into()),
+            liste(fenler),
+            liste(hamleler)
+        );
+        // Önce geçici dosyaya yaz, sonra üstüne taşı: sunucu yarım yazılmış
+        // bir dosya okumasın.
+        let gecici = format!("{}.tmp", self.yol);
+        if std::fs::write(&gecici, govde).is_ok() {
+            let _ = std::fs::rename(&gecici, &self.yol);
+        }
+    }
+}
+
+fn json_kac(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// `izle` her hamleden sonra çağrılır: (o ana kadarki fenler, hamle adları).
+fn play_from(
+    start: &Position,
+    a: &mut Engine,
+    b: &mut Engine,
+    a_is_first: bool,
+    mut izle: impl FnMut(&[String], &[String]),
+) -> Option<usize> {
     let mut pos = *start;
+    let mut fenler = vec![to_fen(&pos)];
+    let mut hamleler: Vec<String> = Vec::new();
+    izle(&fenler, &hamleler);
     while pos.winner().is_none() && pos.ply < MAX_PLY {
         // side 0 her zaman alttan başlayan taraf.
         let a_turn = (pos.side == 0) == a_is_first;
         let e = if a_turn { &mut *a } else { &mut *b };
         let mv = e.choose(&pos).mv;
         let Some(mv) = mv else { return None };
+        hamleler.push(move_name(&pos, mv));
         pos.make(mv);
+        fenler.push(to_fen(&pos));
+        izle(&fenler, &hamleler);
     }
     let w = pos.winner()?;
     // A kazandı mı?
@@ -245,6 +317,7 @@ fn cmd_match(args: &[String]) {
     );
     let t = Instant::now();
     let toplam_oyun = pairs * 2;
+    let canli = Canli::yeni(&spec_a, &spec_b);
     // Oyun başına bir satır basıyoruz, açılış çifti başına değil. Sebebi
     // kalan süre tahmini: 2M iterasyonlu bir maçta bir açılış çifti 10+
     // dakika sürüyor, o çözünürlükte ETA hesaplanamıyor.
@@ -253,7 +326,16 @@ fn cmd_match(args: &[String]) {
         for (k, a_first) in [true, false].into_iter().enumerate() {
             let mut a = Engine::parse(&spec_a, seed + g as u64 * 7 + 1);
             let mut b = Engine::parse(&spec_b, seed + g as u64 * 13 + 2);
-            let sonuc = match play_from(&start, &mut a, &mut b, a_first) {
+            let oyun_no = g * 2 + k + 1;
+            let (sa, sb) = (a_wins, b_wins);
+            let mut son: (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
+            let sonuc_ham = play_from(&start, &mut a, &mut b, a_first, |f, h| {
+                if let Some(c) = &canli {
+                    c.yaz(oyun_no, toplam_oyun, a_first, (sa, sb), f, h, None);
+                    son = (f.to_vec(), h.to_vec());
+                }
+            });
+            let sonuc = match sonuc_ham {
                 Some(0) => {
                     a_wins += 1;
                     "A"
@@ -267,7 +349,10 @@ fn cmd_match(args: &[String]) {
                     "-"
                 }
             };
-            let oynanan = g * 2 + k + 1;
+            if let Some(c) = &canli {
+                c.yaz(oyun_no, toplam_oyun, a_first, (a_wins, b_wins), &son.0, &son.1, Some(sonuc));
+            }
+            let oynanan = oyun_no;
             println!(
                 "oyun {oynanan:>4}/{toplam_oyun}  açılış {:>3} {}  kazanan {sonuc}  {:.0} sn  [{a_wins}-{b_wins}]",
                 g + 1,
@@ -454,7 +539,7 @@ fn cmd_tournament(args: &[String]) {
                 let mut ea = Engine::parse(&specs[gv.i], 7 + gv.g as u64 * 13 + gv.i as u64);
                 let mut eb = Engine::parse(&specs[gv.j], 11 + gv.g as u64 * 19 + gv.j as u64);
                 // i'nin bu oyundan aldigi puan: 1 kazanma, 0.5 bitmedi, 0 kayip
-                let puan = match play_from(&start, &mut ea, &mut eb, gv.a_first) {
+                let puan = match play_from(&start, &mut ea, &mut eb, gv.a_first, |_, _| {}) {
                     Some(0) => 1.0,
                     Some(_) => 0.0,
                     None => 0.5,
