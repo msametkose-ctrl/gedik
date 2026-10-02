@@ -53,7 +53,7 @@ Every command takes an engine spec:
 |---|---|
 | `mcts:300000` | 300 000 PUCT iterations |
 | `mcts:3000ms` | 3 second budget instead |
-| `mcts:200000:t=0` | use all cores (root parallel) |
+| `mcts:200000:t=0` | use all cores (one shared tree, virtual loss) |
 | `mcts:200000:nn=0` | disable the network, use the linear evaluation |
 | `mcts:200000:w=0` | use the hand-written weights instead of the fitted ones |
 | `mctsu:20000` | classic UCT, no policy prior |
@@ -64,7 +64,9 @@ Keys: `cp` c_puct · `fpu` first-play urgency · `et` expand threshold ·
 `mn` node cap · `mc` max children · `noise` root noise · `t` threads ·
 `nn` network on/off · `pol` learned move ordering · `pt` its temperature ·
 `sq` non-saturating value · `pr` priors · `sv` solver · `ru` tree reuse
-between moves (on by default) · `ag` network file, e.g. `ag=ag_resnet.bin`.
+between moves (on by default) · `ag` network file, e.g. `ag=ag_resnet.bin` ·
+`tp=0` root parallelism instead of the shared tree · `tn` shared tree node
+capacity. Separate keys with commas: `mcts:3000ms:t=0,ag=ag_mlp.bin`.
 
 ---
 

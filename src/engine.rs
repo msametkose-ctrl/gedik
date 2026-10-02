@@ -34,8 +34,9 @@ pub enum Engine {
         trees: Vec<Mcts>,
         /// Ağaç yeniden kullanımı açık mı (`ru=0` kapatır, ölçüm için).
         reuse: bool,
-        /// `tp=1`: thread'ler tek paylaşımlı ağaçta çalışır (`paylasim`).
-        /// Kapalıyken kök paralelliği: thread başına ayrı ağaç.
+        /// Thread'ler tek paylaşımlı ağaçta çalışır (`paylasim`, varsayılan).
+        /// `tp=0`: kök paralelliği, thread başına ayrı ağaç. Tek thread'de
+        /// her zaman klasik tek ağaç.
         paylasimli: bool,
         /// Paylaşımlı ağacın düğüm kapasitesi (`tn=`).
         tp_dugum: usize,
@@ -91,7 +92,9 @@ impl Engine {
                 }
                 let mut threads = 1usize;
                 let mut reuse = true;
-                let mut paylasimli = false;
+                // Paylaşımlı ağaç, kök paralelliğini tüm çekirdeklerle 400 ms'de
+                // 18-0, 4 thread'de 72-30 yendi. `tp=0` eskisine döner.
+                let mut paylasimli = true;
                 // 32 bayt/düğüm: 40M ≈ 1,3 GB, ama sayfalar kullanıldıkça ayrılıyor.
                 let mut tp_dugum = 40_000_000usize;
 
@@ -215,7 +218,7 @@ impl Engine {
                 let c = *cfg;
                 let sd = *seed;
                 let n = (*threads).max(1);
-                if *paylasimli {
+                if *paylasimli && n > 1 {
                     // Thread bağlamları: ayarlar, ağ tamponu, tohum. Ağaçları boş kalıyor.
                     if trees.len() != n {
                         *trees = (0..n).map(|t| Mcts::new(sd.wrapping_add(t as u64 * 7 + 1) | 1)).collect();

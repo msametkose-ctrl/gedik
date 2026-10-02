@@ -501,17 +501,16 @@ const $ = id => document.getElementById(id);
 const tahta = $("tahta");
 
 // ------------------------------------------------------------------ seviyeler
-// Hepsi tüm çekirdekleri kullanır (t=0, kök paralelliği). Sabit iterasyonlu
-// seviyelerde toplam iterasyon ağaçlara bölündüğü için çekirdek sayısıyla
-// çarpılır; her ağaç seviyenin adı kadar düşünür.
+// Hepsi tüm çekirdekleri kullanır (t=0). Çekirdekler tek paylaşımlı ağaçta
+// çalıştığı için iterasyon sayısı ağacın toplamıdır; kolay seviyelerde
+// cevap yine anında gelir.
 let CORES = 1;
 let SEVIYELER = [];
 function seviyeleriKur() {
-  const c = Math.max(1, CORES);
   SEVIYELER = [
-    { spec: `mcts:${2500 * c}:t=0`,  ad: "Kolay",     not: "anında",      g: 12 },
-    { spec: `mcts:${20000 * c}:t=0`, ad: "Orta",      not: "anında",      g: 30 },
-    { spec: `mcts:${60000 * c}:t=0`, ad: "Zor",       not: "~0,6 sn",     g: 48 },
+    { spec: "mcts:2500:t=0",         ad: "Kolay",     not: "anında",      g: 12 },
+    { spec: "mcts:20000:t=0",        ad: "Orta",      not: "anında",      g: 30 },
+    { spec: "mcts:60000:t=0",        ad: "Zor",       not: "anında",      g: 48 },
     { spec: "mcts:1000ms:t=0",       ad: "Usta",      not: "1 sn düşünür", g: 66 },
     { spec: "mcts:2000ms:t=0",       ad: "Büyükusta", not: "2 sn düşünür", g: 84 },
     { spec: "mcts:3000ms:t=0",       ad: "Maksimum",  not: "3 sn düşünür", g: 100 },

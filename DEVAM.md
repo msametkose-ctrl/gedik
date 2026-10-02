@@ -55,9 +55,12 @@ güç** önemli. Her ölçüm bu senaryoya göre yapılmalı (kısa denemeler i�
 | `does_not_shuffle_when_lost` testi duvar harcamayı da ilerleme sayıyor | Yeni ağ pozisyonu %23-31 görüyor, duvarla direniyor; mekik değil | `99119f9` |
 | `match` motorlara son 16 pozisyonu veriyor (web arayüzü gibi) | Eskiden iki taraf duvarlıyken 400 hamle sağ-sol yapıyordu | `65b7146` |
 | Canlı maç izleme (`GEDIK_CANLI`, `/api/canli`) ve sıfırdan yeni web arayüzü | — | `67886bb`, `c251fad` |
+| **Paylaşımlı ağaç + sanal kayıp** (`src/paylasim.rs`, artık çok thread'de varsayılan; `tp=0` eski kök paralelliği). Kök paralelliğinde 32 ağaç neredeyse aynıydı, tüm çekirdekler tek aramayı tekrar ediyordu | 400 ms, 4 thread: **72-30 (%70,6)**. 400 ms, tüm çekirdekler: **18-0**, Wilson %82-100 | `72218db` |
 | Web arayüzü seviyeleri: hepsi tüm çekirdek, 3 sn eklendi | 2 sn ≈ 6,1M iterasyon; eski "Maksimum" (1M) ≈ 0,3 sn idi | `a8fbed2` |
 
 Açık sorular:
+- Paylaşımlı ağaç 2 sn'de 40M düğüm kapasitesini (`tn`) dolduruyor; sonra yalnız değerlendirme yapıyor. `et` (genişletme eşiği) ve `tn` ayarı, ayrıca kökte düğüm başına TT önbelleği denenmeli.
+- Motor seçenekleri virgülle ayrılır: `mcts:3000ms:t=0,sv=0`. İki nokta ile yazılan anahtarlar sessizce yok sayılıyor.
 - 2,5 sn'de her ağaç 6M düğüm tavanına dayanıyor (~190k iterasyon/ağaç). 3 sn ve tavanı yükseltmek ölçülmedi.
 - 2,5 sn maçlarında hamle başına ortalama ~3,9 sn ölçüldü: bir motor süreyi aşıyor (muhtemelen `ru=0` tarafı her hamlede dev ağacı yeniden ayırıyor). Bakılmalı.
 - 2,5 sn final ölçümü kesinleşmedi; gece bir kez daha (`--parca 1`, SPRT sürdürme ile) çalıştırılabilir.
