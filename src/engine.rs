@@ -34,6 +34,12 @@ pub enum Engine {
         trees: Vec<Mcts>,
         /// Ağaç yeniden kullanımı açık mı (`ru=0` kapatır, ölçüm için).
         reuse: bool,
+        /// `tp=1`: thread'ler tek paylaşımlı ağaçta çalışır (`paylasim`).
+        /// Kapalıyken kök paralelliği: thread başına ayrı ağaç.
+        paylasimli: bool,
+        /// Paylaşımlı ağacın düğüm kapasitesi (`tn=`).
+        tp_dugum: usize,
+        agac: Option<crate::paylasim::Agac>,
     },
     AlphaBeta(Searcher, u64),
 }
@@ -85,6 +91,9 @@ impl Engine {
                 }
                 let mut threads = 1usize;
                 let mut reuse = true;
+                let mut paylasimli = false;
+                // 32 bayt/düğüm: 40M ≈ 1,3 GB, ama sayfalar kullanıldıkça ayrılıyor.
+                let mut tp_dugum = 40_000_000usize;
 
                 // Üçüncü alan: ya tek sayı (c_puct) ya da `anahtar=değer` listesi.
                 // Örn. `mcts:20000:cp=1.4,et=8,t=4`
@@ -126,6 +135,8 @@ impl Engine {
                                 "pt" | "poltemp" => cfg.policy_temp = x,
                                 "guard" | "gd" => cfg.use_guard = x != 0.0,
                                 "ru" | "reuse" => reuse = x != 0.0,
+                                "tp" => paylasimli = x != 0.0,
+                                "tn" => tp_dugum = x as usize,
                                 "endgame" | "eg" => cfg.use_endgame_solver = x != 0.0,
                                 // w=0 elle tasarlanmış (varsayılan), w=1 öğrenilmiş
                                 "w" | "weights" => {
@@ -161,6 +172,9 @@ impl Engine {
                     label: spec.trim().to_string(),
                     trees: Vec::new(),
                     reuse,
+                    paylasimli,
+                    tp_dugum,
+                    agac: None,
                 }
             }
         }
@@ -193,11 +207,33 @@ impl Engine {
                 seed,
                 trees,
                 reuse,
+                paylasimli,
+                tp_dugum,
+                agac,
                 ..
             } => {
                 let c = *cfg;
                 let sd = *seed;
                 let n = (*threads).max(1);
+                if *paylasimli {
+                    // Thread bağlamları: ayarlar, ağ tamponu, tohum. Ağaçları boş kalıyor.
+                    if trees.len() != n {
+                        *trees = (0..n).map(|t| Mcts::new(sd.wrapping_add(t as u64 * 7 + 1) | 1)).collect();
+                    }
+                    for (t, m) in trees.iter_mut().enumerate() {
+                        c.apply(m);
+                        m.history = history.to_vec();
+                        m.reseed(sd.wrapping_mul(0x9e37_79b9).wrapping_add(t as u64 * 7 + 1));
+                    }
+                    let agac = agac.get_or_insert_with(|| crate::paylasim::Agac::new(*tp_dugum));
+                    let (mv, st) = crate::paylasim::ara(agac, pos, *ms, *iters, trees, *reuse);
+                    return Choice {
+                        mv,
+                        info: format!("wr {:.3} · {} düğüm", st.win_rate, st.nodes),
+                        work: st.rollouts as u64,
+                        top: st.top,
+                    };
+                }
                 // Ağaçları sakla: pozisyon önceki kökün kendisi, çocuğu ya da
                 // torunuysa arama o alt ağaçtan devam ediyor. Değilse `run`
                 // hash uyuşmazlığını görüp sıfırdan kuruyor.

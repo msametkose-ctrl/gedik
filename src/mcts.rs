@@ -436,76 +436,13 @@ impl Mcts {
         }
 
         let root = self.nodes[0];
-        let mut top: Vec<(Move, u32, f32)> = (0..root.n_children as u32)
+        let kids: Vec<RootMove> = (0..root.n_children as u32)
             .map(|i| {
                 let n = self.nodes[(root.first_child + i) as usize];
-                let wr = if n.visits > 0 {
-                    n.value / n.visits as f32
-                } else {
-                    0.0
-                };
-                (n.mv, n.visits, wr)
+                RootMove { mv: n.mv, visits: n.visits, value: n.value, prior: n.prior, proof: n.proof }
             })
             .collect();
-        // En çok ziyaret edilen; eşitlikte kazanma oranı.
-        // Mekik / 3-tekrar cezası: geçmişte görülmüş pozisyonlara dönen hamlelerin ziyaret önceliğini düşür.
-        if !self.history.is_empty() {
-            top.sort_by(|a, b| {
-                let mut nxt_a = *pos;
-                nxt_a.make(a.0);
-                let rep_a = self.history.iter().filter(|&&h| h == nxt_a.hash).count();
-                let score_a = a.1 as f32 * (1.0 - (rep_a as f32 * 0.35)).max(0.001);
-
-                let mut nxt_b = *pos;
-                nxt_b.make(b.0);
-                let rep_b = self.history.iter().filter(|&&h| h == nxt_b.hash).count();
-                let score_b = b.1 as f32 * (1.0 - (rep_b as f32 * 0.35)).max(0.001);
-
-                score_b
-                    .total_cmp(&score_a)
-                    .then(b.1.cmp(&a.1))
-                    .then(b.2.total_cmp(&a.2))
-            });
-        } else {
-            top.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.total_cmp(&a.2)));
-        }
-
-        // Kanıtlanmış kazanan hamle varsa istatistiğe bakma, onu oyna.
-        let proven = if self.use_solver {
-            (0..root.n_children as u32)
-                .map(|i| self.nodes[(root.first_child + i) as usize])
-                .find(|n| n.proof == -1)
-                .map(|n| n.mv)
-        } else {
-            None
-        };
-
-        let hopeless = top.first().map(|t| t.2).unwrap_or(0.0) < LOST_THRESHOLD;
-        let fallback = if hopeless {
-            (0..root.n_children as u32)
-                .map(|i| self.nodes[(root.first_child + i) as usize])
-                .filter(|n| n.proof != 1)
-                .max_by(|a, b| a.prior.total_cmp(&b.prior))
-                .or_else(|| {
-                    (0..root.n_children as u32)
-                        .map(|i| self.nodes[(root.first_child + i) as usize])
-                        .max_by(|a, b| a.prior.total_cmp(&b.prior))
-                })
-                .map(|n| n.mv)
-        } else {
-            None
-        };
-
-        let guarded_best = if self.use_guard {
-            crate::guard::filter_root_moves(pos, &top)
-        } else {
-            None
-        };
-
-        let best = proven
-            .or(guarded_best)
-            .or(fallback)
-            .or_else(|| top.first().map(|t| t.0));
+        let (best, mut top) = self.pick_root_move(pos, &kids);
         let win_rate = top.first().map(|t| t.2).unwrap_or(0.0);
         top.truncate(24);
 
@@ -691,6 +628,163 @@ impl Mcts {
         (best_mv, stats)
     }
 
+    /// Bitmemiş bir pozisyonun değeri, sıradaki oyuncunun gözünden: duvar
+    /// kalmadıysa kesin yarış sonucu, yoksa ağ / doğrusal değerlendirme /
+    /// rollout. Önbelleğe dokunmuyor; tek ağaç ve paylaşımlı ağaç ortak.
+    pub(crate) fn static_value(&mut self, pos: &Position) -> f32 {
+        let leaf_side = pos.side as usize;
+        if pos.walls[0] == 0 && pos.walls[1] == 0 {
+            return f32::from(exact_race_winner(pos) == leaf_side);
+        }
+        match self.leaf {
+            Leaf::Rollout => {
+                let w = playout(*pos, &mut self.rng, self.wall_prob, self.max_ply);
+                f32::from(w == leaf_side)
+            }
+            Leaf::Value => {
+                if self.use_nn {
+                    match self.ag() {
+                        Some(n) => n.value(pos, &mut self.nn_scratch),
+                        None => value_with_opt(pos, &self.weights, self.soft_value),
+                    }
+                } else {
+                    value_with_opt(pos, &self.weights, self.soft_value)
+                }
+            }
+        }
+    }
+
+    /// Kökte oynanacak hamle: en çok ziyaret (tekrar cezasıyla), kanıtlanmış
+    /// kazanç, umutsuz pozisyonda prior'a düşme ve kalkan. Tek ağaç da
+    /// paylaşımlı ağaç da aynı kuralı kullanıyor. `top` sıralı döner.
+    pub(crate) fn pick_root_move(
+        &self,
+        pos: &Position,
+        kids: &[RootMove],
+    ) -> (Option<Move>, Vec<(Move, u32, f32)>) {
+        let mut top: Vec<(Move, u32, f32)> = kids
+            .iter()
+            .map(|n| {
+                let wr = if n.visits > 0 { n.value / n.visits as f32 } else { 0.0 };
+                (n.mv, n.visits, wr)
+            })
+            .collect();
+        // En çok ziyaret edilen; eşitlikte kazanma oranı.
+        // Mekik / 3-tekrar cezası: geçmişte görülmüş pozisyonlara dönen hamlelerin ziyaret önceliğini düşür.
+        if !self.history.is_empty() {
+            top.sort_by(|a, b| {
+                let mut nxt_a = *pos;
+                nxt_a.make(a.0);
+                let rep_a = self.history.iter().filter(|&&h| h == nxt_a.hash).count();
+                let score_a = a.1 as f32 * (1.0 - (rep_a as f32 * 0.35)).max(0.001);
+
+                let mut nxt_b = *pos;
+                nxt_b.make(b.0);
+                let rep_b = self.history.iter().filter(|&&h| h == nxt_b.hash).count();
+                let score_b = b.1 as f32 * (1.0 - (rep_b as f32 * 0.35)).max(0.001);
+
+                score_b
+                    .total_cmp(&score_a)
+                    .then(b.1.cmp(&a.1))
+                    .then(b.2.total_cmp(&a.2))
+            });
+        } else {
+            top.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.total_cmp(&a.2)));
+        }
+
+        // Kanıtlanmış kazanan hamle varsa istatistiğe bakma, onu oyna.
+        let proven = if self.use_solver {
+            kids.iter().find(|n| n.proof == -1).map(|n| n.mv)
+        } else {
+            None
+        };
+
+        let hopeless = top.first().map(|t| t.2).unwrap_or(0.0) < LOST_THRESHOLD;
+        let fallback = if hopeless {
+            kids.iter()
+                .filter(|n| n.proof != 1)
+                .max_by(|a, b| a.prior.total_cmp(&b.prior))
+                .or_else(|| kids.iter().max_by(|a, b| a.prior.total_cmp(&b.prior)))
+                .map(|n| n.mv)
+        } else {
+            None
+        };
+
+        let guarded_best = if self.use_guard {
+            crate::guard::filter_root_moves(pos, &top)
+        } else {
+            None
+        };
+
+        let best = proven
+            .or(guarded_best)
+            .or(fallback)
+            .or_else(|| top.first().map(|t| t.0));
+        (best, top)
+    }
+
+    /// Bir düğümün çocukları: aday hamleler ve prior'ları (kökte gürültü,
+    /// `max_children` kırpması dahil). Aday yoksa `None` (terminal).
+    /// Tek ağaçlı arama da paylaşımlı ağaç da bunu kullanıyor.
+    pub(crate) fn child_moves(&mut self, pos: &Position, root: bool) -> Option<(Vec<Move>, Vec<f32>)> {
+        let moves = candidate_moves_filtered(pos, self.filter_walls);
+        if moves.is_empty() {
+            return None;
+        }
+        let mut priors = if self.use_priors {
+            let ag_politika = self.policy_mode > 0
+                && (self.policy_mode > 1 || root)
+                && self.ag().is_some_and(|n| n.has_policy());
+            let ham = if ag_politika {
+                self.ag()
+                    .and_then(|n| n.policy(pos, &moves, &mut self.nn_scratch))
+            } else {
+                None
+            };
+            match ham {
+                Some(logits) => softmax(&logits, self.policy_temp),
+                None => move_priors(pos, &moves),
+            }
+        } else {
+            vec![1.0 / moves.len() as f32; moves.len()]
+        };
+        if root && self.root_noise > 0.0 {
+            let eps = self.root_noise;
+            let mut noise: Vec<f32> = (0..priors.len())
+                .map(|_| -(self.rng.unit().max(1e-6)).ln())
+                .collect();
+            let sum: f32 = noise.iter().sum();
+            if sum > 0.0 {
+                for v in noise.iter_mut() {
+                    *v /= sum;
+                }
+                for (p, n) in priors.iter_mut().zip(noise) {
+                    *p = (1.0 - eps) * *p + eps * n;
+                }
+            }
+        }
+        let mut moves = moves;
+        if moves.len() > self.max_children {
+            let mut idx_arr: Vec<usize> = (0..moves.len()).collect();
+            idx_arr.sort_by(|&a, &b| {
+                let pa = (!moves[a].is_wall(), priors[a]);
+                let pb = (!moves[b].is_wall(), priors[b]);
+                pb.0.cmp(&pa.0).then(pb.1.total_cmp(&pa.1))
+            });
+            idx_arr.truncate(self.max_children);
+            idx_arr.sort_unstable();
+            moves = idx_arr.iter().map(|&i| moves[i]).collect();
+            priors = idx_arr.iter().map(|&i| priors[i]).collect();
+            let sum: f32 = priors.iter().sum();
+            if sum > 0.0 {
+                for p in priors.iter_mut() {
+                    *p /= sum;
+                }
+            }
+        }
+        Some((moves, priors))
+    }
+
     /// Gumbel kökü: ilk adımı `child_idx` çocuğuna zorla, gerisi normal
     /// iterasyon. Eskiden burada `iterate`'in ayrı bir kopyası vardı; kopya
     /// geride kalmıştı (çocuk `side`'ı yanlış, kırpılan hamlelerle öncelikler
@@ -722,62 +816,10 @@ impl Mcts {
                 if self.nodes.len() >= self.max_nodes {
                     break; // bellek tavanı — genişletme, sadece değerlendir
                 }
-                let moves = candidate_moves_filtered(&pos, self.filter_walls);
-                if moves.is_empty() {
+                let Some((moves, priors)) = self.child_moves(&pos, idx == 0) else {
                     self.nodes[idx].terminal = true;
                     break;
-                }
-                let mut priors = if self.use_priors {
-                    let ag_politika = self.policy_mode > 0
-                        && (self.policy_mode > 1 || idx == 0)
-                        && self.ag().is_some_and(|n| n.has_policy());
-                    let ham = if ag_politika {
-                        self.ag()
-                            .and_then(|n| n.policy(&pos, &moves, &mut self.nn_scratch))
-                    } else {
-                        None
-                    };
-                    match ham {
-                        Some(logits) => softmax(&logits, self.policy_temp),
-                        None => move_priors(&pos, &moves),
-                    }
-                } else {
-                    vec![1.0 / moves.len() as f32; moves.len()]
                 };
-                if idx == 0 && self.root_noise > 0.0 {
-                    let eps = self.root_noise;
-                    let mut noise: Vec<f32> = (0..priors.len())
-                        .map(|_| -(self.rng.unit().max(1e-6)).ln())
-                        .collect();
-                    let sum: f32 = noise.iter().sum();
-                    if sum > 0.0 {
-                        for v in noise.iter_mut() {
-                            *v /= sum;
-                        }
-                        for (p, n) in priors.iter_mut().zip(noise) {
-                            *p = (1.0 - eps) * *p + eps * n;
-                        }
-                    }
-                }
-                let mut moves = moves;
-                if moves.len() > self.max_children {
-                    let mut idx_arr: Vec<usize> = (0..moves.len()).collect();
-                    idx_arr.sort_by(|&a, &b| {
-                        let pa = (!moves[a].is_wall(), priors[a]);
-                        let pb = (!moves[b].is_wall(), priors[b]);
-                        pb.0.cmp(&pa.0).then(pb.1.total_cmp(&pa.1))
-                    });
-                    idx_arr.truncate(self.max_children);
-                    idx_arr.sort_unstable();
-                    moves = idx_arr.iter().map(|&i| moves[i]).collect();
-                    priors = idx_arr.iter().map(|&i| priors[i]).collect();
-                    let sum: f32 = priors.iter().sum();
-                    if sum > 0.0 {
-                        for p in priors.iter_mut() {
-                            *p /= sum;
-                        }
-                    }
-                }
 
                 let first = self.nodes.len() as u32;
                 let child_side = 1 - pos.side;
@@ -829,27 +871,11 @@ impl Mcts {
                     }
                     cached.value
                 } else if pos.walls[0] == 0 && pos.walls[1] == 0 {
-                    let w = exact_race_winner(pos);
-                    let val = f32::from(w == leaf_side);
+                    let val = self.static_value(pos);
                     self.tt.insert(pos.hash, val, 0);
                     val
                 } else {
-                    let val = match self.leaf {
-                        Leaf::Rollout => {
-                            let w = playout(*pos, &mut self.rng, self.wall_prob, self.max_ply);
-                            f32::from(w == leaf_side)
-                        }
-                        Leaf::Value => {
-                            if self.use_nn {
-                                match self.ag() {
-                                    Some(n) => n.value(pos, &mut self.nn_scratch),
-                                    None => value_with_opt(pos, &self.weights, self.soft_value),
-                                }
-                            } else {
-                                value_with_opt(pos, &self.weights, self.soft_value)
-                            }
-                        }
-                    };
+                    let val = self.static_value(pos);
                     self.tt.insert(pos.hash, val, self.nodes[leaf_idx].proof);
                     val
                 }

@@ -23,6 +23,7 @@ pub mod heuristics;
 pub mod mcts;
 pub mod moves;
 pub mod nn;
+pub mod paylasim;
 pub mod notation;
 pub mod perft;
 pub mod rating;
