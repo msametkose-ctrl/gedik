@@ -122,7 +122,30 @@ def main():
                     )
         dosya.close()
 
-    for i in range(args.parca):
+    # Aynı isimle önceki parçalar varsa (kesilmiş bir maç) onların bitmiş
+    # çiftlerini sayıma kat; yeni parçalar sonraki numaralardan ve farklı
+    # seed'lerle başlar, açılışlar tekrar etmez.
+    ilk = 0
+    while os.path.exists(os.path.join("deney", f"{args.isim}__{ilk + 1}.txt")):
+        with open(os.path.join("deney", f"{args.isim}__{ilk + 1}.txt"), encoding="utf-8") as f:
+            onceki = {}
+            for satir in f:
+                m = SATIR.search(satir)
+                if not m:
+                    continue
+                k = m.group(3)
+                durum["a" if k == "A" else "b" if k == "B" else "bitmedi"] += 1
+                onceki.setdefault(int(m.group(2)), []).append(k)
+            for sonuc in onceki.values():
+                if len(sonuc) == 2:
+                    ciftler.append(
+                        sum(1.0 if k == "A" else 0.5 if k == "-" else 0.0 for k in sonuc) / 2
+                    )
+        ilk += 1
+    if ilk:
+        print(f"önceki {ilk} parçadan {len(ciftler)} çift alındı", flush=True)
+
+    for i in range(ilk, ilk + args.parca):
         yol = os.path.join("deney", f"{args.isim}__{i + 1}.txt")
         dosya = open(yol, "w", encoding="utf-8")
         p = subprocess.Popen(
